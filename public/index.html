@@ -332,13 +332,14 @@ const DEFAULTS = {
       web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
-      run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
+      look_at_image: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
     },
     confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
   contextChars: 400000,
+  vision: { model: 'glm-4.6v', fallback: 'glm-4.5v', maxDim: 2048 },
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
   search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
@@ -481,7 +482,7 @@ const BUILTINS = {
     group: 'Web', server: true, needs: 'chrome',
     def: {
       name: 'render_page',
-      description: 'Open a URL in a real headless Chrome browser, let its JavaScript run, and return the fully rendered page. Use for single-page apps and JS-heavy sites where http_request only sees an empty shell. Can save a PNG screenshot for the user (you cannot see images yourself).',
+      description: 'Open a URL in a real headless Chrome browser, let its JavaScript run, and return the fully rendered page. Use for single-page apps and JS-heavy sites where http_request only sees an empty shell. Can save a PNG screenshot; use look_at_image on it to see how the page actually looks.',
       parameters: { type: 'object', properties: {
         url: { type: 'string' },
         wait_ms: { type: 'integer', description: 'How long to let the page run JavaScript before capturing, in ms (default 5000, max 60000).' },
@@ -677,6 +678,61 @@ Object.assign(BUILTINS, {
       const langs = language ? [language] : ['python', 'javascript'];
       const reset = langs.filter(l => killSession(`${session}:${l}`));
       return { reset: reset.map(l => `${session}:${l}`), note: reset.length ? 'State cleared.' : 'Nothing was running in that session.' };
+    },
+  },
+});
+
+/* ---------- vision: GLM 5.3 is text-only, so it looks at images through a vision model ---------- */
+async function imageToDataUrl(blob, maxDim) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Not an image format the browser can open')); i.src = url; });
+    const ow = img.naturalWidth || 1024, oh = img.naturalHeight || 1024;
+    const scale = Math.min(1, maxDim / Math.max(ow, oh));
+    const w = Math.max(1, Math.round(ow * scale)), h = Math.max(1, Math.round(oh * scale));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+    let data = c.toDataURL('image/png');
+    if (data.length > 5e6) data = c.toDataURL('image/jpeg', 0.85); // keep the request a sane size
+    return { data, width: w, height: h, original: `${ow}x${oh}` };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function askVision(model, dataUrl, question) {
+  const r = await api('/api/chat', {
+    model, stream: false, max_tokens: 4096,
+    messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: dataUrl } }, { type: 'text', text: question }] }],
+  }, { 'X-Endpoint': S.endpoint });
+  const j = await r.json().catch(() => ({ error: { message: `HTTP ${r.status}` } }));
+  if (j.error || !r.ok) throw new Error(`${j.error?.code ? '[' + j.error.code + '] ' : ''}${j.error?.message || 'HTTP ' + r.status}`);
+  return (j.choices?.[0]?.message?.content || '').trim();
+}
+
+Object.assign(BUILTINS, {
+  look_at_image: {
+    group: 'Vision',
+    def: {
+      name: 'look_at_image',
+      description: "See an image. You can't view images yourself, so this sends an image from the files sandbox (user uploads, render_page screenshots, downloads, crawled images) to a vision model along with your question, and returns what it sees. Use it whenever an image matters: describe it, read text in it (OCR), check what a web page or UI actually looks like, read a chart or diagram, compare details. Ask a specific question for the best answer; call it again with a follow-up question if needed.",
+      parameters: { type: 'object', properties: {
+        path: { type: 'string', description: 'Image path in the files sandbox, e.g. "uploads/photo.jpg" or "screenshots/example.com-123.png".' },
+        question: { type: 'string', description: 'What you want to know about the image. Default: a detailed description including any text.' },
+      }, required: ['path'] },
+    },
+    run: async ({ path, question }) => {
+      const res = await fetch(fileUrl(String(path || '').replace(/^\/+/, '')));
+      if (!res.ok) return { error: `Couldn't open ${path}. Check the path with list_files.` };
+      let img;
+      try { img = await imageToDataUrl(await res.blob(), S.vision.maxDim); } catch (e) { return { error: `${path}: ${e.message}` }; }
+      const q = question || 'Describe this image in detail, including any text in it.';
+      const tried = [];
+      for (const model of [...new Set([S.vision.model, S.vision.fallback].filter(Boolean))]) {
+        try {
+          const answer = await askVision(model, img.data, q);
+          return { path, model, answer, image: { sent_as: `${img.width}x${img.height}`, original: img.original } };
+        } catch (e) { tried.push(`${model}: ${e.message}`); }
+      }
+      return { error: 'Vision models failed. ' + tried.join(' | ') };
     },
   },
 });
@@ -1155,7 +1211,9 @@ async function send() {
   if (attachments.length) {
     text += (text ? '\n\n' : '') + attachments.map(a => a.text != null
       ? `**${a.name}**\n\`\`\`${a.ext}\n${a.text}\n\`\`\``
-      : `📎 Uploaded file: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). It's in your files sandbox. Use read_file (encoding "base64" for binary) or run_code to work with it.`).join('\n\n');
+      : /^image\//.test(a.type)
+        ? `🖼 Uploaded image: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). Use look_at_image to see it.`
+        : `📎 Uploaded file: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). It's in your files sandbox. Use read_file (encoding "base64" for binary) or run_code to work with it.`).join('\n\n');
     attachments = []; renderAttachments();
   }
   if (!cur()) newChat();
@@ -1305,6 +1363,7 @@ function fileLinksHTML(m) {
   if (d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank">📄 ${esc(d.saved_to)}</a> <a href="${fileUrl(d.saved_to)}?download" title="Download">⤓</a>`);
   if (m.name === 'write_file' && d.path) items.push(`<a href="${fileUrl(d.path)}" target="_blank">📄 ${esc(d.path)}</a> <a href="${fileUrl(d.path)}?download" title="Download">⤓</a>`);
   if (d.output_dir) items.push(`📁 ${esc(d.output_dir)} <a href="${zipUrl(d.output_dir)}">⤓ download .zip</a>`);
+  if (m.name === 'look_at_image' && d.path && !d.error) items.push(`<a href="${fileUrl(d.path)}" target="_blank">👁 ${esc(d.path)}</a><br><a href="${fileUrl(d.path)}" target="_blank"><img class="shot" src="${fileUrl(d.path)}" alt="image"></a>`);
   if (d.screenshot_saved_to) items.push(`<a href="${fileUrl(d.screenshot_saved_to)}" target="_blank">🖼 ${esc(d.screenshot_saved_to)}</a><br><a href="${fileUrl(d.screenshot_saved_to)}" target="_blank"><img class="shot" src="${fileUrl(d.screenshot_saved_to)}" alt="screenshot"></a>`);
   return items.length ? `<div class="file-links">${items.join('<br>')}</div>` : '';
 }
@@ -1502,8 +1561,12 @@ function renderPanel() {
       ${sw('tools.autoRun', 'Auto-run tools', 'Execute calls and feed results back automatically.')}
       ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
-      ${['Web', 'Files', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
+      ${['Web', 'Files', 'Vision', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
         sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+      <div class="section-title">Vision model</div>
+      ${field('Model GLM uses to see images', `<select data-bind="vision.model">${['glm-4.6v', 'glm-4.5v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'Your Coding Plan includes glm-4.6v and glm-4.5v. If the main one fails, look_at_image retries with the backup.')}
+      ${field('Backup model', `<select data-bind="vision.fallback"><option value="">None</option>${['glm-4.5v', 'glm-4.6v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.fallback === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
+      ${field('Max image size sent (px)', `<input type="number" min="512" max="4096" step="128" data-bind="vision.maxDim" value="${S.vision.maxDim}">`, 'Bigger images are scaled down to this on their longest side.')}
       <div class="section-title">Code runtime sessions</div>
       ${RUNTIME.sessions.size ? [...RUNTIME.sessions.values()].map(s => {
         const running = [...RUNTIME.jobs.values()].filter(j => j.session === s.name && j.lang === s.lang && ['queued', 'running'].includes(j.status)).length;
