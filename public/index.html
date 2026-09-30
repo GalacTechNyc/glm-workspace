@@ -125,6 +125,7 @@ details.reasoning .md { padding: 0 14px 10px; font-size: .9em; color: var(--mute
 .sr-snip { color: var(--muted); font-size: .92em; margin-top: 2px; }
 .file-links { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: .92em; line-height: 1.8; }
 .file-links a { color: var(--accent); text-decoration: none; }
+.file-links img.shot.gen { max-height: 480px; object-fit: contain; background: var(--panel-2); }
 .file-links img.shot { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; display: block; object-fit: cover; object-position: top; }
 .file-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px; font-size: .86em; }
 .file-row:hover { background: var(--panel-2); }
@@ -332,14 +333,15 @@ const DEFAULTS = {
       web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
-      look_at_image: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
+      look_at_image: true, generate_image: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
   contextChars: 400000,
   vision: { model: 'glm-4.6v', fallback: 'glm-4.5v', maxDim: 2048 },
+  images: { model: 'gpt-image-2', size: 'auto', quality: 'auto' },
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
   search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
@@ -710,7 +712,7 @@ async function askVision(model, dataUrl, question) {
 
 Object.assign(BUILTINS, {
   look_at_image: {
-    group: 'Vision',
+    group: 'Images',
     def: {
       name: 'look_at_image',
       description: "See an image. You can't view images yourself, so this sends an image from the files sandbox (user uploads, render_page screenshots, downloads, crawled images) to a vision model along with your question, and returns what it sees. Use it whenever an image matters: describe it, read text in it (OCR), check what a web page or UI actually looks like, read a chart or diagram, compare details. Ask a specific question for the best answer; call it again with a follow-up question if needed.",
@@ -734,6 +736,26 @@ Object.assign(BUILTINS, {
       }
       return { error: 'Vision models failed. ' + tried.join(' | ') };
     },
+  },
+});
+
+Object.assign(BUILTINS, {
+  generate_image: {
+    group: 'Images', server: true, needs: 'images',
+    def: {
+      name: 'generate_image',
+      description: 'Create an image from a text prompt with OpenAI image models, or edit/remix existing images by passing reference_images (paths in the files sandbox, e.g. an upload or a previous result). The image is saved to the files sandbox and shown to the user. Write rich, specific prompts: subject, style, composition, lighting, colors, and any exact text to render. You can check the result with look_at_image and iterate.',
+      parameters: { type: 'object', properties: {
+        prompt: { type: 'string' },
+        size: { type: 'string', enum: ['auto', '1024x1024', '1536x1024', '1024x1536'], description: 'Square, landscape or portrait. Default from settings.' },
+        quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'], description: 'Higher is slower and costs more. Default from settings.' },
+        background: { type: 'string', enum: ['auto', 'transparent', 'opaque'], description: 'transparent works with png or webp.' },
+        format: { type: 'string', enum: ['png', 'jpeg', 'webp'] },
+        reference_images: { type: 'array', items: { type: 'string' }, description: 'Up to 10 sandbox image paths to edit or use as references.' },
+        save_to: { type: 'string', description: 'Sandbox path to save to. Default: images/<date>-<prompt>.png' },
+      }, required: ['prompt'] },
+    },
+    run: args => callServerTool('generate_image', { model: S.images.model, size: S.images.size, quality: S.images.quality, ...args }),
   },
 });
 
@@ -765,6 +787,7 @@ function needsApproval(name, args) {
   if (name === 'write_file') return c.writes;
   if (name === 'http_request') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   if (name === 'crawl_site') return c.crawls;
+  if (name === 'generate_image') return c.images;
   if (name === 'run_javascript' || name === 'run_code') return c.js;
   return false;
 }
@@ -1363,6 +1386,7 @@ function fileLinksHTML(m) {
   if (d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank">📄 ${esc(d.saved_to)}</a> <a href="${fileUrl(d.saved_to)}?download" title="Download">⤓</a>`);
   if (m.name === 'write_file' && d.path) items.push(`<a href="${fileUrl(d.path)}" target="_blank">📄 ${esc(d.path)}</a> <a href="${fileUrl(d.path)}?download" title="Download">⤓</a>`);
   if (d.output_dir) items.push(`📁 ${esc(d.output_dir)} <a href="${zipUrl(d.output_dir)}">⤓ download .zip</a>`);
+  if (m.name === 'generate_image' && d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank"><img class="shot gen" src="${fileUrl(d.saved_to)}" alt="generated image"></a>`);
   if (m.name === 'look_at_image' && d.path && !d.error) items.push(`<a href="${fileUrl(d.path)}" target="_blank">👁 ${esc(d.path)}</a><br><a href="${fileUrl(d.path)}" target="_blank"><img class="shot" src="${fileUrl(d.path)}" alt="image"></a>`);
   if (d.screenshot_saved_to) items.push(`<a href="${fileUrl(d.screenshot_saved_to)}" target="_blank">🖼 ${esc(d.screenshot_saved_to)}</a><br><a href="${fileUrl(d.screenshot_saved_to)}" target="_blank"><img class="shot" src="${fileUrl(d.screenshot_saved_to)}" alt="screenshot"></a>`);
   return items.length ? `<div class="file-links">${items.join('<br>')}</div>` : '';
@@ -1504,6 +1528,7 @@ const STARTERS = [
   { t: '💻 Coding', d: 'Write a complete single-file HTML/JS snake game with a score, speed-up, and pause key.' },
   { t: '🌐 Web search', d: "What are the biggest tech news stories this week? Search the web, cite your sources with links." },
   { t: '🕸️ Web agent', d: 'Crawl https://example.com (depth 1, save assets), fetch the raw response headers of https://github.com, render https://react.dev in headless Chrome with a screenshot, then write reports/web-test.md summarizing everything you saved.' },
+  { t: '🎨 Image gen', d: 'Generate a poster for a jazz night called "Blue Hour" (deep blues, a saxophone silhouette, art-deco lettering), then look at it and tell me if the text came out right.' },
   { t: '🔧 Tool use', d: 'What time is it for me, what is (17^5 - sqrt(2)) / 3, and what does https://example.com say? Use your tools.' },
   { t: '📐 Math', d: 'Prove that there are infinitely many primes, then derive the sum of the first n cubes. Use LaTeX.' },
   { t: '🧾 Structured output', d: 'Return JSON describing 3 fictional startups: name, pitch, market_size_usd, risks[]. (Try JSON mode in Model settings.)' },
@@ -1561,8 +1586,14 @@ function renderPanel() {
       ${sw('tools.autoRun', 'Auto-run tools', 'Execute calls and feed results back automatically.')}
       ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
-      ${['Web', 'Files', 'Vision', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
+      ${['Web', 'Files', 'Images', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
         sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+      <div class="section-title">Image generation (OpenAI)</div>
+      ${caps.images ? `
+      ${field('Model', `<select data-bind="images.model">${['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'].map(m => `<option ${S.images.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'gpt-image-1-mini is the cheapest. The 2.5 models are the newest.')}
+      ${field('Default size', `<select data-bind="images.size">${[['auto', 'Auto'], ['1024x1024', 'Square 1024×1024'], ['1536x1024', 'Landscape 1536×1024'], ['1024x1536', 'Portrait 1024×1536']].map(([v, l]) => `<option value="${v}" ${S.images.size === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
+      ${field('Default quality', `<select data-bind="images.quality">${['auto', 'low', 'medium', 'high'].map(q => `<option ${S.images.quality === q ? 'selected' : ''}>${q}</option>`).join('')}</select>`, 'GLM can override size and quality per image.')}`
+      : '<div class="meta" style="margin-bottom:8px">Add OPENAI_API_KEY to .env and restart the server to turn this on.</div>'}
       <div class="section-title">Vision model</div>
       ${field('Model GLM uses to see images', `<select data-bind="vision.model">${['glm-4.6v', 'glm-4.5v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'Your Coding Plan includes glm-4.6v and glm-4.5v. If the main one fails, look_at_image retries with the backup.')}
       ${field('Backup model', `<select data-bind="vision.fallback"><option value="">None</option>${['glm-4.5v', 'glm-4.6v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.fallback === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
@@ -1577,6 +1608,7 @@ function renderPanel() {
       ${sw('tools.confirm.writes', 'Writing files')}
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
+      ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}
       ${sw('tools.confirm.js', 'Running code', 'run_javascript and run_code')}
       <div class="section-title">Web access</div>
       ${field('User-Agent', `<input type="text" data-bind="web.userAgent" value="${esc(S.web.userAgent)}" placeholder="Default: desktop Chrome">`, 'Sent with http_request, render_page and crawls. The model can also override it per request via headers.')}

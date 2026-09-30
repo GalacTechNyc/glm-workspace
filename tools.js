@@ -433,7 +433,55 @@ async function clear_sessions(o = {}) {
 }
 
 async function capabilities() {
-  return { chrome: !!CHROME, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+}
+
+/* ---------------- image generation (OpenAI) ---------------- */
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+
+async function generate_image(o) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('Image generation is not set up: add OPENAI_API_KEY to .env and restart the server.');
+  const prompt = String(o.prompt || '').trim();
+  if (!prompt) throw new Error('prompt is required');
+  const model = o.model || 'gpt-image-2';
+  const format = ['png', 'jpeg', 'webp'].includes(o.format) ? o.format : 'png';
+  const opts = { size: o.size || 'auto', quality: o.quality || 'auto', output_format: format, ...(o.background ? { background: o.background } : {}) };
+  const refs = (Array.isArray(o.reference_images) ? o.reference_images : []).slice(0, 10);
+  let r;
+  if (refs.length) {
+    // edit / remix existing images from the sandbox
+    const form = new FormData();
+    form.append('model', model); form.append('prompt', prompt);
+    for (const [k, v] of Object.entries(opts)) form.append(k, v);
+    for (const ref of refs) {
+      const full = safePath(ref);
+      const type = IMAGE_TYPES[path.extname(full).toLowerCase()];
+      if (!type) throw new Error(`${ref}: reference images must be PNG, JPEG, WebP or GIF`);
+      form.append('image[]', new Blob([await fsp.readFile(full)], { type }), path.basename(full));
+    }
+    r = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(300000) });
+  } else {
+    r = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt, n: 1, ...opts }), signal: AbortSignal.timeout(300000),
+    });
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`OpenAI: ${j.error?.message || 'HTTP ' + r.status}`);
+  const item = j.data?.[0];
+  const buf = item?.b64_json ? Buffer.from(item.b64_json, 'base64')
+    : item?.url ? Buffer.from(await (await fetch(item.url, { signal: AbortSignal.timeout(60000) })).arrayBuffer())
+    : null;
+  if (!buf) throw new Error('OpenAI returned no image');
+  const slug = prompt.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'image';
+  const rel = o.save_to || `images/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${slug}.${format === 'jpeg' ? 'jpg' : format}`;
+  const saved = await saveBytes(rel, buf);
+  return {
+    saved_to: saved, model, size: j.size || opts.size, quality: j.quality || opts.quality, bytes: buf.length,
+    ...(refs.length ? { edited_from: refs } : {}), ...(item.revised_prompt ? { revised_prompt: item.revised_prompt } : {}),
+    ...(j.usage ? { usage: j.usage } : {}),
+  };
 }
 
 /* ---------------- long-term memory + past chats ---------------- */
@@ -549,7 +597,7 @@ async function read_chat(o) {
 
 const TOOLS = {
   http_request, render_page, crawl_site, list_files, read_file, write_file, delete_file, clear_sessions, capabilities,
-  memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat,
+  memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
 };
 
 /* ---------------- HTTP glue ---------------- */
