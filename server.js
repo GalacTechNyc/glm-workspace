@@ -195,7 +195,7 @@ http.createServer(async (req, res) => {
   }
 
   if (url.pathname.startsWith('/api/tools/') && req.method === 'POST') return tools.handleTool(url.pathname.slice(11), await readBody(req), res);
-  if (url.pathname.startsWith('/files/')) return tools.serveFile(url.pathname.slice(7), url.searchParams.has('download'), res);
+  if (url.pathname.startsWith('/files/')) return tools.serveFile(url.pathname.slice(7), url.searchParams.has('download'), res, req.headers.range);
   if (url.pathname === '/api/zip') return tools.serveZip(url.searchParams.get('path'), res);
   if (url.pathname === '/api/chats') {
     if (req.method === 'PUT') {

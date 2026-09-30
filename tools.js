@@ -433,7 +433,7 @@ async function clear_sessions(o = {}) {
 }
 
 async function capabilities() {
-  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -482,6 +482,92 @@ async function generate_image(o) {
     ...(refs.length ? { edited_from: refs } : {}), ...(item.revised_prompt ? { revised_prompt: item.revised_prompt } : {}),
     ...(j.usage ? { usage: j.usage } : {}),
   };
+}
+
+/* ---------------- video generation (Atlas Cloud, e.g. ByteDance Seedance) ----------------
+   Async: submit a prediction, poll it, then download the outputs (video, plus last frame if asked). */
+const ATLAS = 'https://api.atlascloud.ai/api/v1/model';
+const videoJobs = new Map(); // prediction id -> { rel, prompt, saved, finishing }
+
+async function atlas(pathname, init = {}) {
+  const r = await fetch(ATLAS + pathname, {
+    ...init,
+    headers: { Authorization: `Bearer ${process.env.ATLASCLOUD_API_KEY}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) },
+    signal: AbortSignal.timeout(60000),
+  });
+  const j = await r.json().catch(() => ({}));
+  const failed = !r.ok || (typeof j.code === 'number' && j.code !== 0 && j.code !== 200);
+  if (failed) throw new Error(`Atlas Cloud: ${j.msg || j.message || 'HTTP ' + r.status}`);
+  return j.data;
+}
+
+async function finishVideo(id, pred) {
+  const job = videoJobs.get(id) || {};
+  if (job.saved) return job.saved;
+  job.finishing ||= (async () => {
+    const outputs = (pred.outputs || []).filter(u => typeof u === 'string');
+    if (!outputs.length) throw new Error('Atlas Cloud finished but returned no output');
+    const base = (job.rel || `videos/${id}.mp4`).replace(/\.\w+$/, '');
+    const result = { video_id: id, status: 'completed' };
+    for (const url of outputs) {
+      const r = await fetch(url, { signal: AbortSignal.timeout(300000) });
+      if (!r.ok) continue;
+      const type = (r.headers.get('content-type') || '').split(';')[0];
+      const buf = Buffer.from(await r.arrayBuffer());
+      const urlExt = (new URL(url).pathname.match(/\.(\w+)$/) || [])[1]?.toLowerCase();
+      if (!result.saved_to && (type.startsWith('video/') || ['mp4', 'mov', 'webm'].includes(urlExt))) {
+        result.saved_to = await saveBytes(`${base}.${urlExt && ['mp4', 'mov', 'webm'].includes(urlExt) ? urlExt : 'mp4'}`, buf);
+        result.bytes = buf.length;
+      } else if (!result.thumbnail && (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp'].includes(urlExt))) {
+        result.thumbnail = await saveBytes(`${base}.last-frame.${urlExt && ['png', 'jpg', 'jpeg', 'webp'].includes(urlExt) ? urlExt : 'jpg'}`, buf);
+      }
+    }
+    if (!result.saved_to) throw new Error('Could not download the video output');
+    job.saved = result; videoJobs.set(id, job);
+    return result;
+  })();
+  videoJobs.set(id, job);
+  try { return await job.finishing; } catch (e) { job.finishing = null; throw e; }
+}
+
+async function waitVideo(id, waitMs) {
+  const deadline = Date.now() + Math.min(Math.max(Number(waitMs) || 0, 0), 600000);
+  for (;;) {
+    const pred = await atlas(`/prediction/${encodeURIComponent(id)}`);
+    const status = String(pred?.status || '').toLowerCase();
+    if (status === 'completed' || status === 'succeeded') return finishVideo(id, pred);
+    if (status === 'failed' || status === 'timeout') return { video_id: id, status, error: pred.error || (status === 'timeout' ? 'Generation timed out on Atlas Cloud' : 'Generation failed') };
+    if (Date.now() >= deadline) return { video_id: id, status: status || 'processing', hint: 'Still rendering. Check again with video_status.' };
+    await sleep(Math.min(4000, Math.max(0, deadline - Date.now())));
+  }
+}
+
+async function generate_video(o) {
+  if (!process.env.ATLASCLOUD_API_KEY) throw new Error('Video generation is not set up: add ATLASCLOUD_API_KEY to .env and restart the server.');
+  const prompt = String(o.prompt || '').trim();
+  if (!prompt) throw new Error('prompt is required');
+  const body = {
+    model: o.model || 'bytedance/seedance-2.5/text-to-video',
+    prompt,
+    duration: Number(o.duration) || 5,
+    resolution: o.resolution || '720p',
+    ratio: o.ratio || 'adaptive',
+    generate_audio: o.generate_audio !== false,
+    watermark: false,
+    return_last_frame: true, // gives GLM an image to check with look_at_image
+    output_format: 'mp4',
+  };
+  const data = await atlas('/generateVideo', { method: 'POST', body: JSON.stringify(body) });
+  if (!data?.id) throw new Error('Atlas Cloud did not return a job id');
+  const slug = prompt.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'video';
+  videoJobs.set(data.id, { prompt, rel: `videos/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}-${slug}.mp4` });
+  const out = await waitVideo(data.id, o.wait_ms ?? 300000);
+  return { ...out, model: body.model, duration: body.duration, resolution: body.resolution, ratio: body.ratio };
+}
+
+async function video_status(o = {}) {
+  if (!o.video_id) return { videos: [...videoJobs.entries()].slice(-15).map(([id, j]) => ({ video_id: id, prompt: j.prompt?.slice(0, 80), ...(j.saved ? { saved_to: j.saved.saved_to } : { status: 'not finished, or not checked since' }) })) };
+  return waitVideo(o.video_id, o.wait_ms ?? 60000);
 }
 
 /* ---------------- long-term memory + past chats ---------------- */
@@ -598,6 +684,7 @@ async function read_chat(o) {
 const TOOLS = {
   http_request, render_page, crawl_site, list_files, read_file, write_file, delete_file, clear_sessions, capabilities,
   memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
+  generate_video, video_status,
 };
 
 /* ---------------- HTTP glue ---------------- */
@@ -611,22 +698,33 @@ async function handleTool(name, body, res) {
 }
 
 // Files are served in a sandboxed origin so downloaded HTML can't run scripts against this app.
-async function serveFile(relUrlPath, download, res) {
+async function serveFile(relUrlPath, download, res, range) {
   try {
     const full = safePath(decodeURIComponent(relUrlPath));
     const st = await fsp.stat(full);
     if (st.isDirectory()) { res.writeHead(302, { Location: `/api/zip?path=${encodeURIComponent(relPath(full))}` }); return res.end(); }
     const ext = path.extname(full).toLowerCase();
     const types = { '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.txt': 'text/plain', '.md': 'text/plain', '.csv': 'text/csv',
-      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf', '.xml': 'text/xml', '.ico': 'image/x-icon' };
-    res.writeHead(200, {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf', '.xml': 'text/xml', '.ico': 'image/x-icon',
+      '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range || '');
+    const partial = !!(m && (m[1] || m[2]));
+    let start = 0, end = st.size - 1;
+    if (partial) {
+      start = m[1] ? +m[1] : Math.max(0, st.size - +m[2]);
+      end = m[1] && m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
+      if (start > end || start >= st.size) { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
+    }
+    res.writeHead(partial ? 206 : 200, {
       'Content-Type': (types[ext] || 'application/octet-stream') + (/^text|json|xml/.test(types[ext] || '') ? '; charset=utf-8' : ''),
-      'Content-Length': st.size,
+      'Content-Length': end - start + 1,
+      'Accept-Ranges': 'bytes',
+      ...(partial ? { 'Content-Range': `bytes ${start}-${end}/${st.size}` } : {}),
       'Content-Security-Policy': 'sandbox',
       'X-Content-Type-Options': 'nosniff',
       ...(download ? { 'Content-Disposition': `attachment; filename="${path.basename(full).replace(/"/g, '')}"` } : {}),
     });
-    fs.createReadStream(full).pipe(res);
+    fs.createReadStream(full, { start, end }).pipe(res);
   } catch (e) {
     res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found');
   }

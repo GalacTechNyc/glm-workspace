@@ -125,6 +125,7 @@ details.reasoning .md { padding: 0 14px 10px; font-size: .9em; color: var(--mute
 .sr-snip { color: var(--muted); font-size: .92em; margin-top: 2px; }
 .file-links { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: .92em; line-height: 1.8; }
 .file-links a { color: var(--accent); text-decoration: none; }
+.file-links video.shot { display: block; max-width: 100%; max-height: 480px; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; background: #000; }
 .file-links img.shot.gen { max-height: 480px; object-fit: contain; background: var(--panel-2); }
 .file-links img.shot { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; display: block; object-fit: cover; object-position: top; }
 .file-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px; font-size: .86em; }
@@ -333,15 +334,16 @@ const DEFAULTS = {
       web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
-      look_at_image: true, generate_image: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
+      look_at_image: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
   contextChars: 400000,
   vision: { model: 'glm-4.6v', fallback: 'glm-4.5v', maxDim: 2048 },
   images: { model: 'gpt-image-2', size: 'auto', quality: 'auto' },
+  videos: { model: 'bytedance/seedance-2.5/text-to-video', duration: 5, resolution: '720p', ratio: 'adaptive', audio: true },
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
   search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
@@ -712,7 +714,7 @@ async function askVision(model, dataUrl, question) {
 
 Object.assign(BUILTINS, {
   look_at_image: {
-    group: 'Images',
+    group: 'Media',
     def: {
       name: 'look_at_image',
       description: "See an image. You can't view images yourself, so this sends an image from the files sandbox (user uploads, render_page screenshots, downloads, crawled images) to a vision model along with your question, and returns what it sees. Use it whenever an image matters: describe it, read text in it (OCR), check what a web page or UI actually looks like, read a chart or diagram, compare details. Ask a specific question for the best answer; call it again with a follow-up question if needed.",
@@ -741,7 +743,7 @@ Object.assign(BUILTINS, {
 
 Object.assign(BUILTINS, {
   generate_image: {
-    group: 'Images', server: true, needs: 'images',
+    group: 'Media', server: true, needs: 'images',
     def: {
       name: 'generate_image',
       description: 'Create an image from a text prompt with OpenAI image models, or edit/remix existing images by passing reference_images (paths in the files sandbox, e.g. an upload or a previous result). The image is saved to the files sandbox and shown to the user. Write rich, specific prompts: subject, style, composition, lighting, colors, and any exact text to render. You can check the result with look_at_image and iterate.',
@@ -756,6 +758,38 @@ Object.assign(BUILTINS, {
       }, required: ['prompt'] },
     },
     run: args => callServerTool('generate_image', { model: S.images.model, size: S.images.size, quality: S.images.quality, ...args }),
+  },
+});
+
+const VIDEO_RESOLUTIONS = ['480p', '720p', '720p-sr', '720p-esr', '1080p', '1080p-sr', '1080p-esr', '1080p-esr & 60fps', '1440p-sr', '1440p-esr', '4k-esr'];
+const VIDEO_RATIOS = ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
+Object.assign(BUILTINS, {
+  generate_video: {
+    group: 'Media', server: true, needs: 'videos',
+    def: {
+      name: 'generate_video',
+      description: "Create a video with synchronized audio (voices, sound effects, music) from a text prompt, using ByteDance Seedance via Atlas Cloud. Rendering takes one to several minutes; this waits up to wait_ms and otherwise returns a video_id to check later with video_status. The MP4 is saved to the files sandbox and plays in the chat. You can't watch video, but the result includes the last frame as an image you can inspect with look_at_image. Strong prompts describe: subject and action, setting, camera (shot type, movement), lighting and mood, style, and sound or dialogue. Longer and higher-resolution videos cost more: make each one count.",
+      parameters: { type: 'object', properties: {
+        prompt: { type: 'string', description: 'English up to ~1000 words, or Chinese under 500 characters.' },
+        duration: { type: 'integer', description: 'Seconds, 4 to 30, or -1 to let the model choose. Default from settings.' },
+        ratio: { type: 'string', enum: VIDEO_RATIOS, description: 'Aspect ratio; "adaptive" picks from the prompt. Default from settings.' },
+        resolution: { type: 'string', enum: VIDEO_RESOLUTIONS, description: '480p/720p/1080p are native; -sr/-esr are upscaled and cost extra. Default from settings.' },
+        generate_audio: { type: 'boolean', description: 'Default from settings.' },
+        wait_ms: { type: 'integer', description: 'How long to wait for rendering before returning (default 300000, max 600000).' },
+      }, required: ['prompt'] },
+    },
+    run: args => callServerTool('generate_video', {
+      model: S.videos.model, duration: S.videos.duration, resolution: S.videos.resolution, ratio: S.videos.ratio, generate_audio: S.videos.audio, ...args,
+    }),
+  },
+  video_status: {
+    group: 'Media', server: true, needs: 'videos',
+    def: {
+      name: 'video_status',
+      description: 'Check a video that is still rendering (video_id from generate_video): waits up to wait_ms and downloads it once finished. Without video_id, lists recent videos.',
+      parameters: { type: 'object', properties: { video_id: { type: 'string' }, wait_ms: { type: 'integer', description: 'Default 60000, max 600000.' } } },
+    },
+    run: args => callServerTool('video_status', args),
   },
 });
 
@@ -788,6 +822,7 @@ function needsApproval(name, args) {
   if (name === 'http_request') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   if (name === 'crawl_site') return c.crawls;
   if (name === 'generate_image') return c.images;
+  if (name === 'generate_video') return c.videos;
   if (name === 'run_javascript' || name === 'run_code') return c.js;
   return false;
 }
@@ -1386,6 +1421,9 @@ function fileLinksHTML(m) {
   if (d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank">📄 ${esc(d.saved_to)}</a> <a href="${fileUrl(d.saved_to)}?download" title="Download">⤓</a>`);
   if (m.name === 'write_file' && d.path) items.push(`<a href="${fileUrl(d.path)}" target="_blank">📄 ${esc(d.path)}</a> <a href="${fileUrl(d.path)}?download" title="Download">⤓</a>`);
   if (d.output_dir) items.push(`📁 ${esc(d.output_dir)} <a href="${zipUrl(d.output_dir)}">⤓ download .zip</a>`);
+  if (['generate_video', 'video_status'].includes(m.name) && /\.(mp4|mov|webm)$/i.test(d.saved_to || '')) {
+    items.push(`<video class="shot" src="${fileUrl(d.saved_to)}" ${d.thumbnail ? `poster="${fileUrl(d.thumbnail)}"` : ''} controls playsinline preload="metadata"></video>`);
+  }
   if (m.name === 'generate_image' && d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank"><img class="shot gen" src="${fileUrl(d.saved_to)}" alt="generated image"></a>`);
   if (m.name === 'look_at_image' && d.path && !d.error) items.push(`<a href="${fileUrl(d.path)}" target="_blank">👁 ${esc(d.path)}</a><br><a href="${fileUrl(d.path)}" target="_blank"><img class="shot" src="${fileUrl(d.path)}" alt="image"></a>`);
   if (d.screenshot_saved_to) items.push(`<a href="${fileUrl(d.screenshot_saved_to)}" target="_blank">🖼 ${esc(d.screenshot_saved_to)}</a><br><a href="${fileUrl(d.screenshot_saved_to)}" target="_blank"><img class="shot" src="${fileUrl(d.screenshot_saved_to)}" alt="screenshot"></a>`);
@@ -1529,6 +1567,7 @@ const STARTERS = [
   { t: '🌐 Web search', d: "What are the biggest tech news stories this week? Search the web, cite your sources with links." },
   { t: '🕸️ Web agent', d: 'Crawl https://example.com (depth 1, save assets), fetch the raw response headers of https://github.com, render https://react.dev in headless Chrome with a screenshot, then write reports/web-test.md summarizing everything you saved.' },
   { t: '🎨 Image gen', d: 'Generate a poster for a jazz night called "Blue Hour" (deep blues, a saxophone silhouette, art-deco lettering), then look at it and tell me if the text came out right.' },
+  { t: '🎬 Video gen', d: 'Make a 5-second video of a paper boat drifting down a rain-soaked city gutter at night: neon reflections, slow tracking shot, gentle rain sounds. Then check the last frame and tell me how it came out.' },
   { t: '🔧 Tool use', d: 'What time is it for me, what is (17^5 - sqrt(2)) / 3, and what does https://example.com say? Use your tools.' },
   { t: '📐 Math', d: 'Prove that there are infinitely many primes, then derive the sum of the first n cubes. Use LaTeX.' },
   { t: '🧾 Structured output', d: 'Return JSON describing 3 fictional startups: name, pitch, market_size_usd, risks[]. (Try JSON mode in Model settings.)' },
@@ -1586,7 +1625,7 @@ function renderPanel() {
       ${sw('tools.autoRun', 'Auto-run tools', 'Execute calls and feed results back automatically.')}
       ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
-      ${['Web', 'Files', 'Images', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
+      ${['Web', 'Files', 'Media', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
         sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
       <div class="section-title">Image generation (OpenAI)</div>
       ${caps.images ? `
@@ -1594,6 +1633,15 @@ function renderPanel() {
       ${field('Default size', `<select data-bind="images.size">${[['auto', 'Auto'], ['1024x1024', 'Square 1024×1024'], ['1536x1024', 'Landscape 1536×1024'], ['1024x1536', 'Portrait 1024×1536']].map(([v, l]) => `<option value="${v}" ${S.images.size === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
       ${field('Default quality', `<select data-bind="images.quality">${['auto', 'low', 'medium', 'high'].map(q => `<option ${S.images.quality === q ? 'selected' : ''}>${q}</option>`).join('')}</select>`, 'GLM can override size and quality per image.')}`
       : '<div class="meta" style="margin-bottom:8px">Add OPENAI_API_KEY to .env and restart the server to turn this on.</div>'}
+      <div class="section-title">Video generation (Atlas Cloud)</div>
+      ${caps.videos ? `
+      ${field('Model', `<input type="text" data-bind="videos.model" value="${esc(S.videos.model)}">`, 'Any Atlas Cloud text-to-video model name.')}
+      ${field('Default length (seconds)', `<input type="number" min="-1" max="30" data-bind="videos.duration" value="${S.videos.duration}">`, '4 to 30, or -1 to let the model decide.')}
+      ${field('Default resolution', `<select data-bind="videos.resolution">${VIDEO_RESOLUTIONS.map(r => `<option ${S.videos.resolution === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`, '480p, 720p and 1080p are native; the -sr/-esr options are upscaled and priced higher.')}
+      ${field('Default aspect ratio', `<select data-bind="videos.ratio">${VIDEO_RATIOS.map(r => `<option ${S.videos.ratio === r ? 'selected' : ''}>${r}</option>`).join('')}</select>`)}
+      ${sw('videos.audio', 'Generate audio', 'Voices, sound effects and music synced to the video.')}
+      <div class="help" style="font-size:.78em;color:var(--muted);margin:8px 0 4px">GLM can override length, resolution, ratio and audio per video.</div>`
+      : '<div class="meta" style="margin-bottom:8px">Add ATLASCLOUD_API_KEY to .env and restart the server to turn this on.</div>'}
       <div class="section-title">Vision model</div>
       ${field('Model GLM uses to see images', `<select data-bind="vision.model">${['glm-4.6v', 'glm-4.5v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'Your Coding Plan includes glm-4.6v and glm-4.5v. If the main one fails, look_at_image retries with the backup.')}
       ${field('Backup model', `<select data-bind="vision.fallback"><option value="">None</option>${['glm-4.5v', 'glm-4.6v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.fallback === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
@@ -1609,6 +1657,7 @@ function renderPanel() {
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
       ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}
+      ${sw('tools.confirm.videos', 'Generating videos', 'Priced by length and resolution; the priciest tool')}
       ${sw('tools.confirm.js', 'Running code', 'run_javascript and run_code')}
       <div class="section-title">Web access</div>
       ${field('User-Agent', `<input type="text" data-bind="web.userAgent" value="${esc(S.web.userAgent)}" placeholder="Default: desktop Chrome">`, 'Sent with http_request, render_page and crawls. The model can also override it per request via headers.')}
