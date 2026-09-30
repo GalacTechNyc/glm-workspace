@@ -11,6 +11,9 @@ A local, fully customizable chat workspace for [Z.ai](https://z.ai) GLM models (
   - Files: a sandbox (`files/`) with list/read/write/delete, a Files tab, and zip downloads
   - Memory: `remember` / `update_memory` / `forget`, plus `search_chats` / `read_chat` across every past conversation
   - Compute: `run_javascript` (with `http` and `files` helpers), calculator, current time
+  - GitHub: `github_api` — the REST API with your `GITHUB_TOKEN` (token stays in `.env`)
+  - Shell: `run_command` — allowlisted binaries only, executed without a shell, approval-gated
+  - MCP: connect any streamable-HTTP MCP server; its tools show up via `mcp_list` / `mcp_call`
   - Custom tools: define your own with a JSON schema and a JavaScript handler
 - **Autopilot**: GLM works in cycles on a mission you give it, or one it picks itself, with limits or no limit, pause/stop, and a journal in `autopilot/journal.md`
 - **Look**: themes, accent color, fonts, widths, and custom CSS
@@ -28,6 +31,19 @@ npm start
 
 Open http://localhost:5173.
 
+## Optional capabilities (all keys live in `.env`)
+
+| Key | Unlocks |
+|---|---|
+| `OPENAI_API_KEY` | `generate_image`, audio transcription & listening |
+| `ATLASCLOUD_API_KEY` | `generate_video` (Seedance) |
+| `TAVILY_API_KEY` / `BRAVE_API_KEY` | extra web search providers |
+| `GITHUB_TOKEN` | `github_api` — full GitHub REST API access; the token is attached server-side and never shown to the model |
+| `COMMAND_ALLOWLIST` | `run_command` — a comma-separated list of the only binaries GLM may execute. Commands run **without a shell** (one binary + plain arguments; pipes/redirects/substitutions are rejected), in the files sandbox, with a timeout and output caps. Off unless the list is set. |
+| `MCP_SERVERS` | MCP bridge — `name=url` pairs, comma-separated. After a restart the model can discover each server's tools (`mcp_list`) and call them (`mcp_call`). |
+
+For local/LAN targets (e.g. testing your own dev servers), also flip **Settings → Web access → Allow local network**.
+
 ## Where things live
 
 | Path | What |
@@ -41,3 +57,5 @@ Open http://localhost:5173.
 ## Safety notes
 
 The server only listens on `127.0.0.1` and rejects requests from other sites. It isn't built to be exposed to the internet: anyone who can reach it can use your API key and its web tools. Tools can't reach your local network unless you enable it, the crawler respects `robots.txt`, and autopilot can be kept read-only on the web.
+
+`run_command` deserves respect: a page the model fetches could try to steer it into running something. That's why it needs an explicit allowlist, has no shell interpretation (no pipes, redirects, or substitution), runs in the sandbox directory, and asks for approval before every run by default. Keep the allowlist to what you actually use, and keep confirmations on for it.

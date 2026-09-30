@@ -433,7 +433,7 @@ async function clear_sessions(o = {}) {
 }
 
 async function capabilities() {
-  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -768,10 +768,172 @@ async function read_chat(o) {
   return { chat_id: c.id, title: c.title, total_messages: c.messages.length, messages: msgs, ...(next < c.messages.length ? { next_offset: next } : {}) };
 }
 
+/* ---------------- GitHub API (token stays in .env, never shown to the model) ---------------- */
+async function github_api(o) {
+  const key = process.env.GITHUB_TOKEN;
+  if (!key) throw new Error('github_api is not set up: add GITHUB_TOKEN to .env and restart the server.');
+  const p = String(o.path || '');
+  if (!p.startsWith('/') || p.startsWith('//')) throw new Error('path must be an absolute API path like /repos/owner/repo');
+  const url = new URL(p, 'https://api.github.com');
+  if (url.origin !== 'https://api.github.com') throw new Error('Only api.github.com is allowed');
+  const method = String(o.method || 'GET').toUpperCase();
+  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) throw new Error('Unsupported method ' + method);
+  const headers = {
+    Authorization: `Bearer ${key}`,
+    Accept: o.accept || 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'glm-workspace',
+  };
+  let body;
+  if (o.body != null) { headers['Content-Type'] = 'application/json'; body = typeof o.body === 'string' ? o.body : JSON.stringify(o.body); }
+  const r = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(Math.min(Number(o.timeout_ms) || 30000, 120000)) });
+  const rl = k => r.headers.get('x-ratelimit-' + k);
+  const out = {
+    status: r.status, status_text: r.statusText, url: r.url,
+    rate_limit: { limit: rl('limit'), remaining: rl('remaining') },
+    ...(r.headers.get('link') ? { pagination: r.headers.get('link') } : {}),
+  };
+  const text = await r.text();
+  if (text) { try { out.body = JSON.parse(text); } catch { out.body = text.slice(0, 50000); } }
+  return out;
+}
+
+/* ---------------- shell: run_command (allowlisted binaries, executed WITHOUT a shell) ---------------- */
+function commandAllowlist() {
+  return (process.env.COMMAND_ALLOWLIST || '').split(',').map(s => s.trim().replace(/^\/+/, '')).filter(Boolean);
+}
+
+// minimal tokenizer: single/double quotes group arguments; no escapes, substitution or metachars allowed
+function splitArgs(cmd) {
+  const out = [];
+  let cur = '', q = null;
+  for (const c of String(cmd)) {
+    if (q) { if (c === q) q = null; else cur += c; continue; }
+    if (c === "'" || c === '"') { q = c; continue; }
+    if (/\s/.test(c)) { if (cur) { out.push(cur); cur = ''; } continue; }
+    cur += c;
+  }
+  if (q) throw new Error('Unterminated quote in command');
+  if (cur) out.push(cur);
+  return out;
+}
+
+async function run_command(o) {
+  const allow = commandAllowlist();
+  if (!allow.length) throw new Error('run_command is not configured: add COMMAND_ALLOWLIST=binary1,binary2,... to .env and restart the server.');
+  const cmd = String(o.command || '').trim();
+  if (!cmd) throw new Error('command is required');
+  if (/[`$|;&<>\n\r]/.test(cmd)) throw new Error('Shell metacharacters (| ; & < > ` $ newlines) are not allowed. The command runs one binary with plain arguments, without a shell.');
+  const parts = splitArgs(cmd);
+  const bin = path.basename(parts[0]);
+  if (!allow.includes(bin)) throw new Error(`${bin} is not on the COMMAND_ALLOWLIST (${allow.join(', ')}). Add it to .env if the user wants it.`);
+  const cwd = o.cwd ? safePath(o.cwd) : FILES_ROOT;
+  const timeoutMs = Math.min(Math.max(Number(o.timeout_ms) || 60000, 1000), 600000);
+  const t0 = Date.now();
+  return await new Promise(resolve => {
+    const p = spawn(parts[0], parts.slice(1), { cwd });
+    let out = '', err = '';
+    const CAP = 200000;
+    p.stdout.on('data', d => { if (out.length < CAP) out += d.toString(); });
+    p.stderr.on('data', d => { if (err.length < CAP) err += d.toString(); });
+    let killed = false;
+    const timer = setTimeout(() => { killed = true; try { p.kill('SIGKILL'); } catch {} }, timeoutMs);
+    const finish = (code, signal) => {
+      clearTimeout(timer);
+      const clip = s => s.length > 60000 ? s.slice(0, 60000) + `\n…[${s.length - 60000} more chars]` : s;
+      resolve({
+        command: parts.join(' '), binary: bin, exit_code: code, ...(signal ? { signal } : {}),
+        timed_out: killed, duration_ms: Date.now() - t0, cwd: relPath(cwd) || 'files root',
+        stdout: clip(out), ...(err ? { stderr: clip(err) } : {}),
+        ...(out.length >= CAP || err.length >= CAP ? { note: 'output capped at 200KB' } : {}),
+      });
+    };
+    p.on('error', e => { err += e.message; finish(null, undefined); });
+    p.on('close', finish);
+  });
+}
+
+/* ---------------- MCP bridge: any streamable-HTTP MCP server via MCP_SERVERS in .env ---------------- */
+function mcpServers() {
+  const list = [];
+  for (const pair of (process.env.MCP_SERVERS || '').split(',')) {
+    const i = pair.indexOf('=');
+    if (i < 2) continue;
+    const name = pair.slice(0, i).trim().replace(/[^A-Za-z0-9_-]/g, '_');
+    const url = pair.slice(i + 1).trim();
+    if (name && /^https?:\/\//.test(url)) list.push({ name, url, session: null });
+  }
+  return list;
+}
+const mcpClients = new Map(); // name -> { srv, tools }
+
+async function mcpPost(srv, body) {
+  const r = await fetch(srv.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(srv.session ? { 'mcp-session-id': srv.session } : {}) },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${srv.name}: HTTP ${r.status} ${text.slice(0, 200)}`);
+  const sid = r.headers.get('mcp-session-id'); if (sid) srv.session = sid;
+  const data = text.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).pop();
+  return data ? JSON.parse(data) : (text ? JSON.parse(text) : null);
+}
+
+async function mcpClient(name) {
+  if (mcpClients.has(name)) return mcpClients.get(name);
+  const srv = mcpServers().find(s => s.name === name);
+  if (!srv) throw new Error(`No MCP server named "${name}". Configured: ${mcpServers().map(s => s.name).join(', ') || '(none)'}. Set MCP_SERVERS=name=url in .env.`);
+  const init = await mcpPost(srv, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'glm-workspace', version: '1' } } });
+  if (init?.error) throw new Error(`${name}: ${init.error.message}`);
+  await mcpPost(srv, { jsonrpc: '2.0', method: 'notifications/initialized' });
+  const c = { srv, tools: null };
+  mcpClients.set(name, c);
+  return c;
+}
+
+async function mcpRefresh(c) {
+  if (c.tools) return c;
+  const list = await mcpPost(c.srv, { jsonrpc: '2.0', id: Date.now(), method: 'tools/list' });
+  if (list?.error) throw new Error(`${c.srv.name}: ${list.error.message}`);
+  c.tools = (list?.result?.tools || []).map(t => ({ name: t.name, description: t.description || '', parameters: t.inputSchema || { type: 'object', properties: {} } }));
+  return c;
+}
+
+async function mcp_list() {
+  const servers = mcpServers();
+  if (!servers.length) return { servers: [], note: 'No MCP servers configured. Add MCP_SERVERS=name=url,name2=url2 to .env and restart the server.' };
+  const out = [];
+  for (const s of servers) {
+    try { const c = await mcpRefresh(await mcpClient(s.name)); out.push({ name: s.name, url: s.url, ok: true, tools: c.tools }); }
+    catch (e) { mcpClients.delete(s.name); out.push({ name: s.name, url: s.url, ok: false, error: e.message }); }
+  }
+  return { servers: out };
+}
+
+async function mcp_call(o) {
+  if (!o.server || !o.tool) throw new Error('server and tool are required');
+  const c = await mcpRefresh(await mcpClient(o.server));
+  if (!c.tools.some(t => t.name === o.tool)) { c.tools = null; await mcpRefresh(c); }
+  const call = { jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: o.tool, arguments: o.args || {} } };
+  let msg = await mcpPost(c.srv, call);
+  if (msg?.error) { // expired session: re-init once and retry
+    mcpClients.delete(o.server); c.srv.session = null;
+    const c2 = await mcpRefresh(await mcpClient(o.server));
+    msg = await mcpPost(c2.srv, call);
+  }
+  if (msg?.error) throw new Error(`${o.server}.${o.tool}: ${msg.error.message}`);
+  const contents = msg?.result?.content || [];
+  const joined = contents.filter(x => x.type === 'text').map(x => x.text).join('\n');
+  let parsed; try { parsed = JSON.parse(joined); } catch { parsed = null; }
+  return { server: o.server, tool: o.tool, ...(msg?.result?.isError ? { is_error: true } : {}), result: parsed ?? (joined || null) };
+}
+
 const TOOLS = {
   http_request, render_page, crawl_site, list_files, read_file, write_file, delete_file, clear_sessions, capabilities,
   memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
   generate_video, video_status, transcribe_chunks, listen_audio,
+  github_api, run_command, mcp_list, mcp_call,
 };
 
 /* ---------------- HTTP glue ---------------- */

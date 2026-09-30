@@ -335,8 +335,9 @@ const DEFAULTS = {
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
       look_at_image: true, transcribe_audio: true, listen_to_audio: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
+      github_api: true, run_command: false, mcp_list: true, mcp_call: true,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
@@ -539,6 +540,61 @@ const BUILTINS = {
     run: args => callServerTool('delete_file', args),
   },
 };
+/* ---------- GitHub API, allowlisted shell, MCP bridge ---------- */
+let mcpInfo = { servers: [] };
+function refreshMcp() { callServerTool('mcp_list', {}).then(r => { if (r && !r.error) mcpInfo = r; }).catch(() => {}); }
+function mcpSummary() {
+  const ok = (mcpInfo.servers || []).filter(s => s.ok);
+  if (!ok.length) return '';
+  return ' Connected servers: ' + ok.map(s => `${s.name} (${(s.tools || []).slice(0, 25).map(t => t.name).join(', ')})`).join('; ') + '.';
+}
+Object.assign(BUILTINS, {
+  github_api: {
+    group: 'Web', server: true, needs: 'github',
+    def: {
+      name: 'github_api',
+      description: "Call the GitHub REST API (api.github.com) with the owner's GITHUB_TOKEN from .env — the token never appears in results. Use for repos, issues, pull requests, code search, commits, releases, branches, users, gists: anything api.github.com serves. GET by default; POST/PUT/PATCH/DELETE create or change things (may need approval). List responses are paginated: use ?page=N and ?per_page=.",
+      parameters: { type: 'object', properties: {
+        path: { type: 'string', description: 'API path starting with /, e.g. /repos/owner/repo, /search/repositories?q=x, /user' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
+        body: { type: 'object', description: 'JSON request body (an object, not a string).' },
+        accept: { type: 'string', description: 'Optional Accept override, e.g. application/vnd.github.raw+json for file contents.' },
+      }, required: ['path'] },
+    },
+    run: args => callServerTool('github_api', args),
+  },
+  run_command: {
+    group: 'System', server: true, needs: 'shell',
+    def: {
+      name: 'run_command',
+      description: 'Run an allowlisted command-line binary on this machine. There is NO shell: one binary with plain arguments; pipes, redirects, backticks and $ are rejected. Only binaries named in COMMAND_ALLOWLIST (.env) can run. Runs in the files sandbox by default, so output files (e.g. nmap -oN scan.txt) are downloadable. Asks the user before each run unless confirmations are off.',
+      parameters: { type: 'object', properties: {
+        command: { type: 'string', description: 'e.g. "nmap -sn 192.168.1.0/24" or "subfinder -d example.com". Quotes group arguments.' },
+        cwd: { type: 'string', description: 'Working directory inside the files sandbox (default: sandbox root).' },
+        timeout_ms: { type: 'integer', description: 'Default 60000, max 600000.' },
+      }, required: ['command'] },
+    },
+    run: args => callServerTool('run_command', args),
+  },
+  mcp_list: {
+    group: 'MCP', server: true, needs: 'mcp',
+    def: { name: 'mcp_list', description: 'List the MCP servers configured via MCP_SERVERS in .env and the tools each exposes (name, description, parameters).', parameters: { type: 'object', properties: {} } },
+    run: async () => { const r = await callServerTool('mcp_list', {}); if (!r.error) mcpInfo = r; return r; },
+  },
+  mcp_call: {
+    group: 'MCP', server: true, needs: 'mcp',
+    def: {
+      name: 'mcp_call',
+      description: 'Call a tool on a connected MCP server. Server and tool names come from mcp_list.',
+      parameters: { type: 'object', properties: {
+        server: { type: 'string', description: 'Server name as configured in MCP_SERVERS.' },
+        tool: { type: 'string', description: 'Tool name that server exposes.' },
+        args: { type: 'object', description: "Arguments matching that tool's parameters." },
+      }, required: ['server', 'tool'] },
+    },
+    run: args => callServerTool('mcp_call', args),
+  },
+});
 const refreshAfter = p => p.then(r => { refreshMemory(); return r; });
 Object.assign(BUILTINS, {
   remember: {
@@ -918,6 +974,9 @@ function needsApproval(name, args) {
   if (name === 'generate_video') return c.videos;
   if (name === 'transcribe_audio' || name === 'listen_to_audio') return c.audio;
   if (name === 'run_javascript' || name === 'run_code') return c.js;
+  if (name === 'run_command') return c.commands;
+  if (name === 'mcp_call') return c.mcp;
+  if (name === 'github_api') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   return false;
 }
 let pendingApproval = null;
@@ -955,6 +1014,7 @@ function activeTools() {
     const def = { ...BUILTINS[k].def };
     // the model has no clock; give search a sense of "now" for queries like "this week"
     if (k === 'web_search') def.description += ` Today's date is ${new Date().toDateString()}.`;
+    if (k === 'mcp_call') def.description += mcpSummary();
     list.push({ type: 'function', function: def });
   }
   for (const t of S.tools.custom) {
@@ -1726,8 +1786,8 @@ function renderPanel() {
       ${sw('tools.autoRun', 'Auto-run tools', 'Execute calls and feed results back automatically.')}
       ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
-      ${['Web', 'Files', 'Media', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
-        sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+      ${['Web', 'Files', 'System', 'Media', 'Memory', 'Compute', 'MCP'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
+        sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? ({ chrome: 'Unavailable: Chrome not found on this Mac.', github: 'Unavailable: add GITHUB_TOKEN to .env and restart.', shell: 'Unavailable: add COMMAND_ALLOWLIST to .env and restart.', mcp: 'Unavailable: add MCP_SERVERS=name=url to .env and restart.' })[BUILTINS[k].needs] || 'Unavailable: not configured.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
       <div class="section-title">Image generation (OpenAI)</div>
       ${caps.images ? `
       ${field('Model', `<select data-bind="images.model">${['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'].map(m => `<option ${S.images.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'gpt-image-1-mini is the cheapest. The 2.5 models are the newest.')}
@@ -1762,6 +1822,8 @@ function renderPanel() {
       ${sw('tools.confirm.writes', 'Writing files')}
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
+      ${sw('tools.confirm.commands', 'Running shell commands', 'run_command — allowlisted binaries, no shell')}
+      ${sw('tools.confirm.mcp', 'Calling MCP tools')}
       ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}
       ${sw('tools.confirm.audio', 'Transcribing or listening to audio', 'Billed per minute of audio')}
       ${sw('tools.confirm.videos', 'Generating videos', 'Priced by length and resolution; the priciest tool')}
@@ -2103,6 +2165,7 @@ $('#input').addEventListener('paste', async e => {
   applyLook(); renderAll(); renderPanel(); loadModels();
   fetch('/api/search/providers').then(r => r.json()).then(p => { searchProviders = p; if (activeTab === 'tools') renderPanel(); }).catch(() => {});
   callServerTool('capabilities', {}).then(c => { caps = c; if (activeTab === 'tools') renderPanel(); }).catch(() => {});
+  refreshMcp();
   refreshMemory();
   $('#input').focus();
 })();
