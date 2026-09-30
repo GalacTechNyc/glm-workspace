@@ -194,6 +194,7 @@ http.createServer(async (req, res) => {
     res.writeHead(403); return res.end('Missing X-GLM-Workspace header');
   }
 
+  if (autoRoute(url.pathname, req, res)) return;
   if (url.pathname.startsWith('/api/tools/') && req.method === 'POST') return tools.handleTool(url.pathname.slice(11), await readBody(req), res);
   if (url.pathname.startsWith('/files/')) return tools.serveFile(url.pathname.slice(7), url.searchParams.has('download'), res, req.headers.range);
   if (url.pathname === '/api/zip') return tools.serveZip(url.searchParams.get('path'), res);

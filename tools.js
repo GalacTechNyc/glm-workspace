@@ -12,6 +12,18 @@ const { spawn } = require('child_process');
 const FILES_ROOT = path.join(__dirname, 'files');
 fs.mkdirSync(FILES_ROOT, { recursive: true });
 
+// Extra roots (EXTRA_ROOTS=/abs/path[:rw|:r],... in .env) let the model work on real
+// directories outside the files sandbox: read files, run commands with cwd there.
+// Paths are addressed as root:<name>/relative. :r roots are read-only for file writes.
+const EXTRA_ROOTS = [];
+for (const spec of (process.env.EXTRA_ROOTS || '').split(',').map(s => s.trim()).filter(Boolean)) {
+  const [raw, mode] = spec.split(':');
+  const full = path.resolve(raw.replace(/^~(?=\/|$)/, os.homedir()));
+  if (full === FILES_ROOT || full === path.join(__dirname, 'data')) continue;
+  EXTRA_ROOTS.push({ name: (path.basename(full) || 'root').replace(/[^A-Za-z0-9_-]/g, '_'), full, write: (mode || 'rw') !== 'r' });
+}
+function findExtraRoot(full) { return EXTRA_ROOTS.find(r => full === r.full || full.startsWith(r.full + path.sep)); }
+
 const DEFAULT_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const HARD_MAX_CHARS = 500_000;
 const CHROME = [
@@ -25,15 +37,36 @@ const CHROME = [
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------------- files sandbox ---------------- */
-function safePath(p = '') {
-  const full = path.resolve(FILES_ROOT, String(p).replace(/^\/+/, ''));
+function safePath(p = '', { write = false } = {}) {
+  const s = String(p);
+  const m = s.match(/^root:([A-Za-z0-9_-]+)(?:\/+(.*))?$/);
+  if (m) {
+    const r = EXTRA_ROOTS.find(x => x.name === m[1]);
+    if (!r) throw new Error(`Unknown root "root:${m[1]}". Configured: ${EXTRA_ROOTS.map(x => 'root:' + x.name).join(', ') || '(none — add EXTRA_ROOTS to .env)'}`);
+    if (write && !r.write) throw new Error(`root:${r.name} is read-only`);
+    const full = path.resolve(r.full, m[2] || '');
+    if (full !== r.full && !full.startsWith(r.full + path.sep)) throw new Error('Path escapes the root');
+    return full;
+  }
+  if (/^([A-Za-z]:[\\/]|\/|\\\\)/.test(s)) { // absolute: only inside a configured root
+    const full = path.resolve(s);
+    const r = findExtraRoot(full);
+    if (!r) throw new Error('Absolute paths outside configured roots are not allowed. Use sandbox-relative paths or root:name/... (EXTRA_ROOTS in .env).');
+    if (write && !r.write) throw new Error(`root:${r.name} is read-only`);
+    return full;
+  }
+  const full = path.resolve(FILES_ROOT, s.replace(/^\/+/, ''));
   if (full !== FILES_ROOT && !full.startsWith(FILES_ROOT + path.sep)) throw new Error('Path escapes the files sandbox');
   return full;
 }
-const relPath = full => path.relative(FILES_ROOT, full).split(path.sep).join('/');
+const relPath = full => {
+  const r = findExtraRoot(full);
+  if (r) return full === r.full ? 'root:' + r.name : 'root:' + r.name + '/' + path.relative(r.full, full).split(path.sep).join('/');
+  return path.relative(FILES_ROOT, full).split(path.sep).join('/');
+};
 
 async function saveBytes(rel, buf) {
-  const full = safePath(rel);
+  const full = safePath(rel, { write: true });
   await fsp.mkdir(path.dirname(full), { recursive: true });
   await fsp.writeFile(full, buf);
   return relPath(full);
@@ -410,7 +443,7 @@ async function read_file(o) {
 
 async function write_file(o) {
   if (!o.path) throw new Error('path is required');
-  const full = safePath(o.path);
+  const full = safePath(o.path, { write: true });
   if (full === FILES_ROOT) throw new Error('Invalid path');
   await fsp.mkdir(path.dirname(full), { recursive: true });
   const data = o.encoding === 'base64' ? Buffer.from(o.content || '', 'base64') : Buffer.from(o.content ?? '', 'utf8');
@@ -420,7 +453,7 @@ async function write_file(o) {
 }
 
 async function delete_file(o) {
-  const full = safePath(o.path);
+  const full = safePath(o.path, { write: true });
   if (full === FILES_ROOT) throw new Error('Refusing to delete the whole sandbox');
   const st = await fsp.stat(full);
   await fsp.rm(full, { recursive: true, force: true });
@@ -433,7 +466,8 @@ async function clear_sessions(o = {}) {
 }
 
 async function capabilities() {
-  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()],
+    extra_roots: EXTRA_ROOTS.map(r => ({ name: r.name, write: r.write })) };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -990,4 +1024,12 @@ function serveZip(rel, res) {
   z.on('error', () => res.end());
 }
 
-module.exports = { handleTool, serveFile, serveZip };
+// Direct tool invocation for the headless autopilot (see autopilot.js).
+async function callTool(name, args = {}) {
+  const fn = TOOLS[name];
+  if (!fn) throw new Error(`Unknown tool: ${name}`);
+  try { return await fn(args); }
+  catch (e) { throw new Error(e.message.split(FILES_ROOT + path.sep).join('').split(FILES_ROOT).join('files')); }
+}
+
+module.exports = { handleTool, serveFile, serveZip, callTool, loadMemory, EXTRA_ROOTS };

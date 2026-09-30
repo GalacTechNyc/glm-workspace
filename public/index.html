@@ -337,7 +337,7 @@ const DEFAULTS = {
       look_at_image: true, transcribe_audio: true, listen_to_audio: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
       github_api: true, run_command: false, mcp_list: true, mcp_call: true,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false, outsideWrites: true },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
@@ -966,8 +966,8 @@ const webOpts = () => ({ userAgent: S.web.userAgent || undefined, allowPrivate: 
 /* approvals for actions with side effects */
 function needsApproval(name, args) {
   const c = S.tools.confirm;
-  if (name === 'delete_file') return c.deletes;
-  if (name === 'write_file') return c.writes;
+  if (name === 'delete_file') return c.deletes || (/^root:/.test(String(args.path || '')) && c.outsideWrites !== false);
+  if (name === 'write_file') return c.writes || (/root:/.test(String(args.path || '')) && c.outsideWrites !== false);
   if (name === 'http_request') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   if (name === 'crawl_site') return c.crawls;
   if (name === 'generate_image') return c.images;
@@ -1823,6 +1823,7 @@ function renderPanel() {
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
       ${sw('tools.confirm.commands', 'Running shell commands', 'run_command — allowlisted binaries, no shell')}
+      ${sw('tools.confirm.outsideWrites', 'Writing outside the files sandbox', 'root:name paths from EXTRA_ROOTS')}
       ${sw('tools.confirm.mcp', 'Calling MCP tools')}
       ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}
       ${sw('tools.confirm.audio', 'Transcribing or listening to audio', 'Billed per minute of audio')}

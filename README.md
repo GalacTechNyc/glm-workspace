@@ -44,6 +44,26 @@ Open http://localhost:5173.
 
 For local/LAN targets (e.g. testing your own dev servers), also flip **Settings → Web access → Allow local network**.
 
+| Key | Unlocks |
+|---|---|
+| `EXTRA_ROOTS` | Real directories outside the sandbox, addressed as `root:name/...` — e.g. `EXTRA_ROOTS=~/projects:rw,/var/www:r`. Read/write (`:rw`, default) or read-only (`:r`). Writes outside the sandbox ask for confirmation by default. |
+| `AUTO_MODEL` / `AUTO_ENDPOINT` | Tuning for the headless autopilot below. |
+
+## Headless autopilot (server-side, no browser tab)
+
+The UI autopilot runs in a browser tab. There is also a lean server-side runner that keeps working when the tab is closed — same `.env` key, server-side tools only (no `web_search`/`run_code`/media in v1), journaling to `files/autopilot/journal.md`:
+
+```bash
+# start a run (defaults: 10 cycles, 30 min, read-only web, no commands)
+curl -s localhost:5173/api/auto/start -H 'content-type: application/json' \
+  -d '{"goal":"Audit https://example.com: crawl it, note every form and outbound link, write autopilot/audit/report.md"}'
+
+curl -s localhost:5173/api/auto/status   # progress + log tail
+curl -s -X POST localhost:5173/api/auto/stop
+```
+
+`readOnlyWeb` (default true), `allowCommands` and `allowWrites` are per-run flags on the start call. Without a human to approve prompts, confirm-worthy actions are denied rather than guessed at — flip the flags explicitly when you want more.
+
 ## Where things live
 
 | Path | What |
