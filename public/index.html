@@ -316,7 +316,7 @@ const WEB_AGENT_PRESET = { name: 'Web agent', text: `You are GLM, an autonomous 
 - web_search finds sources. http_request gives exact raw responses (any method, headers, cookies via "session", binary files). render_page runs a real headless Chrome for JavaScript-heavy sites. crawl_site maps or mirrors whole sites.
 - Everything you download or write lands in a files sandbox the user can download. Save useful outputs (data, reports, code) with write_file and tell the user the path.
 - Large responses are paged: continue with offset = next_offset instead of guessing.
-- Use run_javascript (with its http/files helpers) for parsing, scripted scraping, and data processing.
+- Use run_code (persistent Python/JavaScript sessions, no time limit) for parsing, data processing, analysis and scripted scraping.
 - Be polite to websites: avoid needless requests, respect robots.txt, and never try to bypass logins, paywalls or CAPTCHAs.
 - Cite sources with links and verify claims before stating them.` };
 
@@ -331,7 +331,7 @@ const DEFAULTS = {
       web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
-      run_javascript: true, calculator: true, get_current_time: true,
+      run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
     },
     confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false },
     custom: [EXAMPLE_TOOL],
@@ -410,7 +410,7 @@ const BUILTINS = {
     group: 'Compute',
     def: {
       name: 'run_javascript',
-      description: 'Execute async JavaScript in the browser and return the result plus console output. Use `return` to return a value. Helpers: `await http({url, method, headers, body, format, session, save_to})` (same as http_request: full network access, returns the response object), `await files.read(path)` (string), `await files.write(path, content)`, `await files.list(path)`, `await sleep(ms)`. DOMParser is available for parsing HTML. Use for scripted multi-step scraping, parsing, and data processing. 60s timeout.',
+      description: 'Execute async JavaScript in the browser and return the result plus console output. Use `return` to return a value. Helpers: `await http({url, method, headers, body, format, session, save_to})` (same as http_request: full network access, returns the response object), `await files.read(path)` (string), `await files.write(path, content)`, `await files.list(path)`, `await sleep(ms)`. DOMParser is available for parsing HTML. Quick one-off scripts only (60s timeout, nothing persists). For longer work, Python, packages or state between runs, use run_code.',
       parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
     },
     run: async ({ code }) => {
@@ -561,6 +561,125 @@ Object.assign(BUILTINS, {
   },
 });
 
+/* ---------- persistent code runtime (Web Worker sessions, see runtime-worker.js) ---------- */
+const RUNTIME = { sessions: new Map(), jobs: new Map(), seq: 0 };
+const RPC_ALLOWED = new Set(['http_request', 'read_file', 'write_file', 'list_files']);
+const OUTPUT_CAP = 400000;
+
+function runtimeSession(name, lang) {
+  const key = `${name}:${lang}`;
+  let s = RUNTIME.sessions.get(key);
+  if (s) return s;
+  const worker = new Worker('/runtime-worker.js');
+  s = { key, name, lang, worker, created: Date.now(), status: 'starting', runs: 0 };
+  worker.onmessage = e => onRuntimeMessage(s, e.data);
+  worker.onerror = e => { s.status = 'crashed'; s.error = e.message; };
+  worker.postMessage({ type: 'init', lang });
+  RUNTIME.sessions.set(key, s);
+  return s;
+}
+
+async function onRuntimeMessage(s, m) {
+  const job = m.jobId && RUNTIME.jobs.get(m.jobId);
+  if (m.type === 'ready') s.status = 'ready';
+  else if (m.type === 'init-error') { s.status = 'failed'; s.error = m.error; }
+  else if (m.type === 'rpc') {
+    // the worker can only reach these tools, and they go through the usual approvals / autopilot rules
+    const result = RPC_ALLOWED.has(m.name) ? await guardedServerTool(m.name, m.args || {}) : { error: `Not available from the runtime: ${m.name}` };
+    s.worker.postMessage({ type: 'rpc-result', rpcId: m.rpcId, result });
+  } else if (job && m.type === 'started') { job.status = 'running'; job.started = Date.now(); }
+  else if (job && m.type === 'log') {
+    job.output += m.stream === 'stderr' ? m.text.replace(/^/gm, '[stderr] ').replace(/\[stderr\] $/, '') : m.text;
+    if (job.output.length > OUTPUT_CAP) { const cut = job.output.length - OUTPUT_CAP; job.output = job.output.slice(cut); job.read = Math.max(0, job.read - cut); job.dropped = (job.dropped || 0) + cut; }
+  } else if (job && m.type === 'result') {
+    Object.assign(job, { status: m.ok ? 'done' : 'error', result: m.result, error: m.error, ms: m.ms, ended: Date.now() });
+    job.waiters.splice(0).forEach(w => w());
+  }
+}
+
+function jobReport(job, { full } = {}) {
+  const fresh = job.output.slice(full ? 0 : job.read);
+  job.read = job.output.length;
+  const out = fresh.length > 50000 ? '…[' + (fresh.length - 50000) + ' earlier chars omitted]\n' + fresh.slice(-50000) : fresh;
+  return {
+    job_id: job.id, session: job.session, language: job.lang, status: job.status,
+    ...(job.status === 'done' ? { result: job.result } : {}), ...(job.error ? { error: job.error } : {}),
+    output: out, ...(job.dropped ? { note: `${job.dropped} chars of early output were dropped (output cap)` } : {}),
+    elapsed_s: +(((job.ended || Date.now()) - (job.started || job.queued)) / 1000).toFixed(1),
+    ...(['queued', 'running'].includes(job.status) ? { hint: 'Still running in the background. Check again with code_status.' } : {}),
+  };
+}
+
+const waitJob = (job, ms) => ['done', 'error'].includes(job.status) ? Promise.resolve()
+  : new Promise(r => { const t = setTimeout(r, ms); job.waiters.push(() => { clearTimeout(t); r(); }); });
+
+function killSession(key) {
+  const s = RUNTIME.sessions.get(key); if (!s) return false;
+  s.worker.terminate(); RUNTIME.sessions.delete(key);
+  for (const j of RUNTIME.jobs.values()) if (`${j.session}:${j.lang}` === key && ['queued', 'running'].includes(j.status)) {
+    Object.assign(j, { status: 'error', error: 'Session was reset', ended: Date.now() }); j.waiters.splice(0).forEach(w => w());
+  }
+  return true;
+}
+
+Object.assign(BUILTINS, {
+  run_code: {
+    group: 'Compute',
+    def: {
+      name: 'run_code',
+      description: 'Run Python or JavaScript in a persistent, sandboxed runtime (a background worker isolated from the computer). State persists between runs in the same session: variables, imports, functions, loaded data. No hard time limit: if a run is still going after wait_ms you get status "running" plus a job_id, and it keeps running in the background (check with code_status). Python is CPython via Pyodide: numpy, pandas, scipy, matplotlib, scikit-learn and more load automatically on import; install pure-Python packages with `import micropip; await micropip.install("name")`. The last expression is returned as the result. In Python, plain variables persist between runs (there is no `state` object in Python). Python helpers: `import glm`, then `await glm.http({"url": ...})`, `await glm.read_file(path)`, `await glm.write_file(path, text_or_bytes)`, `await glm.list_files(path)`. JavaScript helpers: `await http({url, ...})`, `await files.read/write/list(...)`, `await sleep(ms)`; top-level await works; locals reset each run, so keep values on `state` (e.g. `state.rows = rows`). Sessions reset if the app is reloaded, so save durable results to the files sandbox.',
+      parameters: { type: 'object', properties: {
+        language: { type: 'string', enum: ['python', 'javascript'] },
+        code: { type: 'string' },
+        session: { type: 'string', description: 'Session name (default "main"). Use separate sessions to run things in parallel.' },
+        wait_ms: { type: 'integer', description: 'How long to wait for the result before returning "running" (default 60000, max 600000).' },
+      }, required: ['language', 'code'] },
+    },
+    run: async ({ language = 'python', code, session = 'main', wait_ms }) => {
+      if (!['python', 'javascript'].includes(language)) return { error: 'language must be "python" or "javascript"' };
+      const s = runtimeSession(session, language);
+      if (s.status === 'failed') return { error: `Runtime failed to start: ${s.error}. Try code_reset.` };
+      const id = 'job_' + (++RUNTIME.seq);
+      const job = { id, session, lang: language, status: 'queued', output: '', read: 0, queued: Date.now(), waiters: [] };
+      RUNTIME.jobs.set(id, job); s.runs++;
+      s.worker.postMessage({ type: 'run', jobId: id, code });
+      await waitJob(job, Math.min(Math.max(+wait_ms || 60000, 1000), 600000));
+      return jobReport(job, { full: true });
+    },
+  },
+  code_status: {
+    group: 'Compute',
+    def: {
+      name: 'code_status',
+      description: 'Check a background job from run_code: wait up to wait_ms for it to finish and get any new output since you last checked. Without job_id, list runtime sessions and recent jobs.',
+      parameters: { type: 'object', properties: { job_id: { type: 'string' }, wait_ms: { type: 'integer', description: 'Default 30000, max 600000.' } } },
+    },
+    run: async ({ job_id, wait_ms }) => {
+      if (!job_id) return {
+        sessions: [...RUNTIME.sessions.values()].map(s => ({ session: s.name, language: s.lang, status: s.status, runs: s.runs, ...(s.error ? { error: s.error } : {}) })),
+        recent_jobs: [...RUNTIME.jobs.values()].slice(-15).map(j => ({ job_id: j.id, session: j.session, language: j.lang, status: j.status })),
+      };
+      const job = RUNTIME.jobs.get(job_id);
+      if (!job) return { error: `No job ${job_id}` };
+      await waitJob(job, Math.min(Math.max(+wait_ms || 30000, 0), 600000));
+      return jobReport(job);
+    },
+  },
+  code_reset: {
+    group: 'Compute',
+    def: {
+      name: 'code_reset',
+      description: 'Stop and restart a runtime session, clearing its state and killing any running job in it. Use for runaway jobs or a clean slate.',
+      parameters: { type: 'object', properties: { session: { type: 'string', description: 'Default "main".' }, language: { type: 'string', enum: ['python', 'javascript'], description: 'Omit to reset both languages for that session.' } } },
+    },
+    run: ({ session = 'main', language }) => {
+      const langs = language ? [language] : ['python', 'javascript'];
+      const reset = langs.filter(l => killSession(`${session}:${l}`));
+      return { reset: reset.map(l => `${session}:${l}`), note: reset.length ? 'State cleared.' : 'Nothing was running in that session.' };
+    },
+  },
+});
+
 let memoryCache = [];
 async function refreshMemory() {
   try { const r = await callServerTool('memory_list', {}); if (Array.isArray(r.memories)) memoryCache = r.memories; } catch {}
@@ -589,7 +708,7 @@ function needsApproval(name, args) {
   if (name === 'write_file') return c.writes;
   if (name === 'http_request') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   if (name === 'crawl_site') return c.crawls;
-  if (name === 'run_javascript') return c.js;
+  if (name === 'run_javascript' || name === 'run_code') return c.js;
   return false;
 }
 let pendingApproval = null;
@@ -1381,12 +1500,17 @@ function renderPanel() {
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
       ${['Web', 'Files', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
         sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+      <div class="section-title">Code runtime sessions</div>
+      ${RUNTIME.sessions.size ? [...RUNTIME.sessions.values()].map(s => {
+        const running = [...RUNTIME.jobs.values()].filter(j => j.session === s.name && j.lang === s.lang && ['queued', 'running'].includes(j.status)).length;
+        return `<div class="file-row"><span class="fname">${s.lang === 'python' ? '🐍' : '🟨'} ${esc(s.name)} <span class="meta">${s.status}${running ? ` · ${running} running` : ''} · ${s.runs} runs</span></span><button class="btn sm" data-rtreset="${esc(s.key)}">Reset</button></div>`;
+      }).join('') : '<div class="meta" style="margin-bottom:8px">None yet. GLM starts one the first time it uses run_code.</div>'}
       <div class="section-title">Ask before running</div>
       ${sw('tools.confirm.deletes', 'Deleting files')}
       ${sw('tools.confirm.writes', 'Writing files')}
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
-      ${sw('tools.confirm.js', 'Running JavaScript')}
+      ${sw('tools.confirm.js', 'Running code', 'run_javascript and run_code')}
       <div class="section-title">Web access</div>
       ${field('User-Agent', `<input type="text" data-bind="web.userAgent" value="${esc(S.web.userAgent)}" placeholder="Default: desktop Chrome">`, 'Sent with http_request, render_page and crawls. The model can also override it per request via headers.')}
       ${field('Max characters per response', `<input type="range" min="5000" max="500000" step="5000" data-bind="web.maxChars" value="${S.web.maxChars}">`, 'How much of a page the model sees per call. It can page through the rest. Bigger uses more tokens.', S.web.maxChars.toLocaleString())}
@@ -1531,6 +1655,7 @@ $('#panelBody').addEventListener('click', e => {
   if (t.dataset.accent) { S.look.accent = t.dataset.accent; saveSettings(); applyLook(); renderPanel(); }
   if (t.dataset.preset) { S.system = S.presets[+t.dataset.preset].text; saveSettings(); renderPanel(); toast(`Loaded "${S.presets[+t.dataset.preset].name}"`); }
   if (t.dataset.tdel) { S.tools.custom.splice(+t.dataset.tdel, 1); saveSettings(); renderPanel(); }
+  if (t.dataset.rtreset) { killSession(t.dataset.rtreset); renderPanel(); toast('Session reset'); }
   if (t.id === 'memAdd') {
     const text = $('#memNew').value.trim();
     if (text) callServerTool('remember', { text, source: 'user' }).then(r => { if (r.error) toast(r.error); refreshMemory(); });
