@@ -1,0 +1,13 @@
+{
+  "name": "glm-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A local, fully customizable chat workspace for Z.ai GLM models with tools, web access, memory and autopilot.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

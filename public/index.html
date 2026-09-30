@@ -1,0 +1,1718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLM Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<style>
+:root {
+  --accent: #6d5dfc;
+  --font-size: 15px;
+  --chat-width: 820px;
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius: 14px;
+  --bg: #f7f7f8; --panel: #ffffff; --panel-2: #f0f0f3; --border: #e3e3e8;
+  --text: #1b1b1f; --muted: #6b6b76; --user-bubble: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  --code-bg: #0f1117; --danger: #d9304f; --ok: #1f9d55;
+}
+:root[data-theme="dark"] {
+  --bg: #0e0f13; --panel: #16171d; --panel-2: #1e2028; --border: #2a2c36;
+  --text: #ececf1; --muted: #9a9aa8; --user-bubble: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0f13; --panel: #16171d; --panel-2: #1e2028; --border: #2a2c36;
+    --text: #ececf1; --muted: #9a9aa8; --user-bubble: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--font-size); line-height: 1.55; overflow: hidden; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.app { display: grid; grid-template-columns: 260px 1fr auto; height: 100vh; }
+.app.no-sidebar { grid-template-columns: 0 1fr auto; }
+.app.no-sidebar .sidebar { display: none; }
+
+/* sidebar */
+.sidebar { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
+.sidebar .top { padding: 14px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.brand .dot { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 12px; }
+.btn { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 7px 12px; transition: background .15s, border-color .15s; }
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.sm { padding: 4px 9px; font-size: .85em; border-radius: 8px; }
+.btn.danger { color: var(--danger); }
+.icon-btn { border: 0; background: transparent; padding: 6px; border-radius: 8px; color: var(--muted); display: inline-grid; place-items: center; }
+.icon-btn:hover { background: var(--panel-2); color: var(--text); }
+.search { width: 100%; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); }
+.chat-list { flex: 1; overflow-y: auto; padding: 8px; }
+.chat-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 9px; cursor: pointer; color: var(--muted); }
+.chat-item:hover { background: var(--panel-2); color: var(--text); }
+.chat-item.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.chat-item .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; }
+.chat-item .icon-btn { opacity: 0; padding: 3px; }
+.chat-item:hover .icon-btn { opacity: 1; }
+.sidebar .bottom { padding: 10px; border-top: 1px solid var(--border); display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* main */
+.main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+.header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.header .title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.pill-select { border: 1px solid var(--border); background: var(--bg); border-radius: 9px; padding: 6px 8px; }
+.toggle-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: .85em; cursor: pointer; user-select: none; color: var(--muted); }
+.toggle-chip.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.messages { flex: 1; overflow-y: auto; padding: 24px 16px 40px; scroll-behavior: smooth; }
+.messages-inner { max-width: var(--chat-width); margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.empty { text-align: center; color: var(--muted); margin-top: 12vh; }
+.empty h2 { color: var(--text); margin-bottom: 6px; font-weight: 600; }
+.starters { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 24px; text-align: left; }
+.starter { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 12px 14px; cursor: pointer; font-size: .92em; }
+.starter:hover { border-color: var(--accent); }
+.starter b { display: block; margin-bottom: 2px; }
+
+.msg { display: flex; flex-direction: column; gap: 4px; }
+.msg.user { align-items: flex-end; }
+.msg .bubble { max-width: 100%; }
+.msg.user .bubble { background: var(--user-bubble); padding: 10px 14px; border-radius: var(--radius); max-width: 85%; white-space: pre-wrap; word-wrap: break-word; }
+.msg.assistant .bubble { width: 100%; }
+body.bubbles .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; }
+.msg .actions { display: flex; gap: 2px; opacity: 0; transition: opacity .15s; align-items: center; flex-wrap: wrap; }
+.msg:hover .actions, .msg.last .actions { opacity: 1; }
+.meta { font-size: .78em; color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.role-label { font-size: .78em; color: var(--muted); font-weight: 500; }
+
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p { margin: .6em 0; }
+.md pre { position: relative; background: var(--code-bg); color: #e6e6e6; padding: 14px; border-radius: 10px; overflow-x: auto; font-size: .88em; }
+.md code { font-family: var(--mono); font-size: .9em; }
+.md :not(pre) > code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; }
+.md pre code.hljs { background: transparent; padding: 0; }
+.md table { border-collapse: collapse; margin: .8em 0; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: 6px 10px; }
+.md blockquote { border-left: 3px solid var(--accent); margin: .6em 0; padding: 2px 12px; color: var(--muted); }
+.md a { color: var(--accent); }
+.copy-code { position: absolute; top: 8px; right: 8px; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid #333; background: #1c1f27; color: #ccc; opacity: 0; }
+.md pre:hover .copy-code { opacity: 1; }
+.code-lang { position: absolute; top: 8px; left: 14px; font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .05em; }
+.md pre.has-lang { padding-top: 28px; }
+
+details.reasoning { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; background: var(--panel-2); }
+details.reasoning summary { cursor: pointer; padding: 7px 12px; font-size: .85em; color: var(--muted); user-select: none; }
+details.reasoning .md { padding: 0 14px 10px; font-size: .9em; color: var(--muted); max-height: 420px; overflow-y: auto; }
+.tool-card { border: 1px solid var(--border); border-radius: 10px; margin: 8px 0; overflow: hidden; font-size: .88em; }
+.tool-card .head { display: flex; gap: 8px; align-items: center; padding: 7px 12px; background: var(--panel-2); font-family: var(--mono); }
+.tool-card pre { margin: 0; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: .92em; max-height: 300px; overflow: auto; }
+.tool-card .pending-actions { padding: 8px 12px; display: flex; gap: 6px; border-top: 1px solid var(--border); }
+.search-card summary { cursor: pointer; list-style: none; }
+.search-card summary::-webkit-details-marker { display: none; }
+.sr-list { margin: 0; padding: 8px 14px 10px 34px; display: flex; flex-direction: column; gap: 8px; font-family: var(--font); }
+.sr-list a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.sr-list a:hover { text-decoration: underline; }
+.sr-site { color: var(--muted); font-size: .85em; margin-left: 6px; }
+.sr-snip { color: var(--muted); font-size: .92em; margin-top: 2px; }
+.file-links { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: .92em; line-height: 1.8; }
+.file-links a { color: var(--accent); text-decoration: none; }
+.file-links img.shot { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; display: block; object-fit: cover; object-position: top; }
+.file-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px; font-size: .86em; }
+.file-row:hover { background: var(--panel-2); }
+.file-row .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .fname a { color: var(--text); text-decoration: none; }
+.file-row .fname a:hover { color: var(--accent); }
+.file-row .icon-btn { padding: 2px 5px; font-size: .95em; text-decoration: none; }
+.auto-bar { max-width: var(--chat-width); margin: 0 auto 8px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); font-size: .88em; flex-wrap: wrap; }
+.auto-bar[hidden] { display: none; }
+.auto-bar .spacer { flex: 1; }
+.auto-bar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.auto-bar.paused .dot { animation: none; background: var(--muted); }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+.msg.auto-tick { align-items: center; }
+.tick { font-size: .78em; color: var(--muted); border: 1px dashed var(--border); border-radius: 999px; padding: 3px 12px; max-width: 90%; text-align: center; }
+.tick.end { border-style: solid; color: var(--text); }
+.auto-form { padding: 14px 16px; overflow-y: auto; }
+.auto-form .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.auto-form label.f { display: block; font-size: .85em; font-weight: 500; margin-bottom: 12px; }
+.auto-form label.f > span { display: block; margin-bottom: 5px; }
+.auto-form input[type=number], .auto-form select, .auto-form textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); font-weight: 400; }
+.auto-form textarea { resize: vertical; }
+.auto-form .check { display: flex; gap: 8px; align-items: flex-start; font-size: .88em; margin: 8px 0; }
+.auto-form .check small { display: block; color: var(--muted); }
+.modal footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.badge { font-size: .75em; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); font-family: var(--font); }
+.badge.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.badge.err { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.error-box { border: 1px solid var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); padding: 10px 14px; border-radius: 10px; font-size: .9em; white-space: pre-wrap; }
+.cursor::after { content: '▍'; animation: blink 1s steps(2) infinite; color: var(--accent); }
+@keyframes blink { 50% { opacity: 0; } }
+.edit-area { width: 100%; min-height: 80px; border: 1px solid var(--accent); border-radius: 10px; padding: 10px; background: var(--panel); resize: vertical; }
+
+/* composer */
+.composer-wrap { padding: 10px 16px 16px; }
+.composer { max-width: var(--chat-width); margin: 0 auto; border: 1px solid var(--border); background: var(--panel); border-radius: 18px; padding: 10px 12px; box-shadow: 0 2px 14px rgba(0,0,0,.05); }
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; max-height: 40vh; min-height: 26px; }
+.composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.composer .spacer { flex: 1; }
+.attachments { display: flex; gap: 6px; flex-wrap: wrap; }
+.attachment { font-size: .8em; border: 1px solid var(--border); border-radius: 8px; padding: 3px 8px; display: inline-flex; gap: 6px; align-items: center; }
+.send-btn { width: 36px; height: 36px; border-radius: 11px; border: 0; background: var(--accent); color: #fff; display: grid; place-items: center; }
+.send-btn:disabled { opacity: .4; cursor: default; }
+.send-btn.stop { background: var(--text); color: var(--bg); }
+.hint { text-align: center; font-size: .75em; color: var(--muted); margin-top: 6px; }
+
+/* settings panel */
+.panel { width: 360px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; }
+.panel.hidden { display: none; }
+.tabs { display: flex; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
+.tab { flex: 1; border: 0; background: transparent; padding: 7px 4px; border-radius: 8px; color: var(--muted); font-size: .85em; }
+.tab.active { background: var(--panel-2); color: var(--text); font-weight: 500; }
+.panel-body { flex: 1; overflow-y: auto; padding: 14px 16px 30px; }
+.field { margin-bottom: 16px; }
+.field label, .field .lbl { display: flex; justify-content: space-between; font-size: .85em; font-weight: 500; margin-bottom: 6px; }
+.field .lbl span:last-child, .field label span:last-child { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.field .help { font-size: .76em; color: var(--muted); margin-top: 4px; }
+.field input[type=text], .field input[type=number], .field select, .field textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
+.field textarea { resize: vertical; font-family: var(--mono); font-size: .85em; }
+.field textarea.prose { font-family: var(--font); font-size: .92em; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+input[type=checkbox] { accent-color: var(--accent); }
+.switch-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: .9em; }
+.switch-row small { display: block; color: var(--muted); font-size: .8em; }
+.section-title { font-size: .72em; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+.tool-def { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.tool-def .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.tool-def input[type=text] { flex: 1; }
+.tool-def textarea { min-height: 70px; margin-top: 6px; }
+.preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.color-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatch.active { border-color: var(--text); }
+
+/* modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal { background: var(--panel); border-radius: 14px; width: min(760px, 100%); max-height: 85vh; display: flex; flex-direction: column; border: 1px solid var(--border); }
+.modal header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.modal pre { margin: 0; padding: 14px 16px; overflow: auto; font-family: var(--mono); font-size: .8em; white-space: pre-wrap; word-break: break-word; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 10px; font-size: .88em; z-index: 60; }
+
+@media (max-width: 900px) {
+  .app, .app.no-sidebar { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: fixed; inset: 0 auto 0 0; width: 270px; z-index: 30; box-shadow: 4px 0 20px rgba(0,0,0,.2); }
+  .panel { position: fixed; inset: 0 0 0 auto; width: min(360px, 100vw); z-index: 30; box-shadow: -4px 0 20px rgba(0,0,0,.2); }
+  .header .hide-sm { display: none; }
+}
+</style>
+<style id="custom-css"></style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar">
+    <div class="top">
+      <div class="brand"><div class="dot">Z</div> GLM Workspace</div>
+      <button class="btn primary" id="newChat">+ New chat <span style="opacity:.6;font-size:.8em">⌘K</span></button>
+      <input class="search" id="search" placeholder="Search chats…">
+    </div>
+    <div class="chat-list" id="chatList"></div>
+    <div class="bottom">
+      <button class="btn sm" id="importBtn">Import</button>
+      <button class="btn sm" id="exportAllBtn">Export all</button>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="header">
+      <button class="icon-btn" id="toggleSidebar" title="Toggle sidebar">☰</button>
+      <div class="title" id="chatTitle" title="Click to rename">New chat</div>
+      <select class="pill-select" id="modelQuick" title="Model"></select>
+      <span class="toggle-chip hide-sm" id="thinkChip" title="Toggle deep thinking">🧠 Thinking</span>
+      <span class="toggle-chip hide-sm" id="searchChip" title="Let the model search the web">🌐 Search</span>
+      <span class="toggle-chip hide-sm" id="toolsChip" title="Toggle tool use">🔧 Tools</span>
+      <span class="toggle-chip" id="autoChip" title="Let GLM run on its own">🤖 Autopilot</span>
+      <button class="icon-btn" id="exportChat" title="Export chat as Markdown">⤓</button>
+      <button class="icon-btn" id="togglePanel" title="Settings">⚙</button>
+    </div>
+    <div class="messages" id="messages"><div class="messages-inner" id="messagesInner"></div></div>
+    <div class="composer-wrap">
+      <div class="auto-bar" id="autoBar" hidden>
+        <span class="dot"></span><b>Autopilot</b><span id="autoStatus" class="meta" style="margin:0"></span>
+        <span class="spacer"></span>
+        <button class="btn sm" id="autoPause">Pause</button>
+        <button class="btn sm danger" id="autoStop">Stop</button>
+      </div>
+      <div class="composer">
+        <div class="attachments" id="attachments"></div>
+        <textarea id="input" rows="1" placeholder="Message GLM…"></textarea>
+        <div class="row">
+          <button class="icon-btn" id="attachBtn" title="Attach text/code files">📎</button>
+          <input type="file" id="fileInput" multiple hidden>
+          <span class="meta" id="statusLine"></span>
+          <div class="spacer"></div>
+          <span class="meta" id="tokenEstimate"></span>
+          <button class="send-btn" id="sendBtn" title="Send">➤</button>
+        </div>
+      </div>
+      <div class="hint" id="hint">Enter to send · Shift+Enter for newline</div>
+    </div>
+  </main>
+
+  <aside class="panel" id="panel">
+    <div class="tabs">
+      <button class="tab active" data-tab="model">Model</button>
+      <button class="tab" data-tab="system">System</button>
+      <button class="tab" data-tab="tools">Tools</button>
+      <button class="tab" data-tab="files">Files</button>
+      <button class="tab" data-tab="memory">Memory</button>
+      <button class="tab" data-tab="look">Look</button>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+  </aside>
+</div>
+
+<script>
+/* =========================================================
+   Storage helpers
+   ========================================================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Storage full — export & delete some chats'); } },
+};
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const EXAMPLE_TOOL = {
+  id: uid(), enabled: true, name: 'get_weather',
+  description: 'Get the current weather for a city.',
+  parameters: JSON.stringify({ type: 'object', properties: { city: { type: 'string', description: 'City name' }, unit: { type: 'string', enum: ['celsius', 'fahrenheit'] } }, required: ['city'] }, null, 2),
+  handler: `// "args" holds the parsed arguments. Return anything (object/string). Can be async.
+// Swap this mock for a real fetch() call if you like.
+const temp = Math.round(10 + Math.random() * 20);
+return { city: args.city, temperature: args.unit === 'fahrenheit' ? Math.round(temp * 9/5 + 32) : temp, unit: args.unit || 'celsius', conditions: ['sunny','cloudy','rainy'][temp % 3] };`,
+};
+
+const DEFAULT_PRESETS = [
+  { name: 'Default', text: 'You are GLM, a helpful, precise assistant. Use Markdown when it helps.' },
+  { name: 'Coder', text: 'You are a senior software engineer. Give correct, idiomatic, production-ready code with brief explanations. Prefer complete runnable examples.' },
+  { name: 'Tutor', text: 'You are a patient tutor. Explain step by step, check understanding, and use simple examples. Use LaTeX ($...$) for math.' },
+  { name: 'Creative', text: 'You are a bold, imaginative creative writer with a vivid voice. Surprise the reader.' },
+  { name: 'Terse', text: 'Answer as briefly as possible. No preamble.' },
+];
+const WEB_AGENT_PRESET = { name: 'Web agent', text: `You are GLM, an autonomous web and research agent with real tools. Plan briefly, then work step by step.
+- web_search finds sources. http_request gives exact raw responses (any method, headers, cookies via "session", binary files). render_page runs a real headless Chrome for JavaScript-heavy sites. crawl_site maps or mirrors whole sites.
+- Everything you download or write lands in a files sandbox the user can download. Save useful outputs (data, reports, code) with write_file and tell the user the path.
+- Large responses are paged: continue with offset = next_offset instead of guessing.
+- Use run_javascript (with its http/files helpers) for parsing, scripted scraping, and data processing.
+- Be polite to websites: avoid needless requests, respect robots.txt, and never try to bypass logins, paywalls or CAPTCHAs.
+- Cite sources with links and verify claims before stating them.` };
+
+const DEFAULTS = {
+  endpoint: 'coding', model: 'glm-5.3',
+  temperature: 0.7, top_p: 0.95, max_tokens: 8192,
+  thinking: true, stream: true, jsonMode: false, stop: '', extra: '{}',
+  system: DEFAULT_PRESETS[0].text, presets: DEFAULT_PRESETS,
+  tools: {
+    enabled: false, autoRun: true, maxRounds: 6, toolChoice: 'auto',
+    builtins: {
+      web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
+      list_files: true, read_file: true, write_file: true, delete_file: true,
+      remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
+      run_javascript: true, calculator: true, get_current_time: true,
+    },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false },
+    custom: [EXAMPLE_TOOL],
+  },
+  auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
+  contextChars: 400000,
+  memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
+  web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
+  search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
+  look: { expandSearch: true, theme: 'system', accent: '#6d5dfc', fontSize: 15, width: 820, font: 'inter', bubbles: false, radius: 14, showReasoning: true, showMeta: true, enterSends: true, customCss: '' },
+};
+function deepMerge(base, over) {
+  if (Array.isArray(base) || typeof base !== 'object' || base === null) return over ?? base;
+  const out = { ...base };
+  for (const k in over || {}) out[k] = (k in base && typeof base[k] === 'object' && !Array.isArray(base[k])) ? deepMerge(base[k], over[k]) : over[k];
+  return out;
+}
+let S = deepMerge(structuredClone(DEFAULTS), store.get('glm.settings', {}));
+let chats = store.get('glm.chats', []); // legacy; moved to the server on boot
+let currentId = store.get('glm.current', null);
+let models = ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'];
+let busy = false, abortCtl = null, attachments = [], activeTab = 'model';
+let caps = { chrome: true, sessions: [] };
+let searchProviders = [{ id: 'zai', label: 'Z.ai Web Search (Coding Plan)', available: true }];
+const requestLog = new Map(); // msg id -> { request, raw }
+
+const saveSettings = () => store.set('glm.settings', S);
+const API_HEADERS = { 'Content-Type': 'application/json', 'X-GLM-Workspace': '1' };
+const api = (path, body, headers = {}) => fetch(path, { method: 'POST', headers: { ...API_HEADERS, ...headers }, body: JSON.stringify(body) });
+const callServerTool = async (name, args) => (await api('/api/tools/' + name, args)).json();
+
+let saveTimer = null;
+function flushChats() {
+  clearTimeout(saveTimer);
+  return fetch('/api/chats', { method: 'PUT', headers: API_HEADERS, body: JSON.stringify(chats) })
+    .then(r => { if (!r.ok) throw new Error(); return true; })
+    .catch(() => { toast('Could not save chats — is the server running?'); return false; });
+}
+const saveChats = () => {
+  store.set('glm.current', currentId);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushChats, 400);
+};
+window.addEventListener('beforeunload', e => { if (AUTO.running) { e.preventDefault(); e.returnValue = ''; } });
+document.addEventListener('visibilitychange', async () => {
+  if (!document.hidden && AUTO.running) try { AUTO.wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+  if (document.hidden && saveTimer) flushChats();
+});
+const cur = () => chats.find(c => c.id === currentId);
+
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2000);
+}
+
+/* =========================================================
+   Built-in tools (run in your browser)
+   ========================================================= */
+const BUILTINS = {
+  calculator: {
+    group: 'Compute',
+    def: { name: 'calculator', description: 'Evaluate a math expression precisely. Supports + - * / ^ % parentheses and Math functions (sqrt, sin, log, PI, etc.).', parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] } },
+    run: ({ expression }) => {
+      if (!/^[\d\s+\-*/^%().,a-zA-Z_]*$/.test(expression)) throw new Error('Invalid characters');
+      const expr = expression.replace(/\^/g, '**').replace(/\b(sqrt|sin|cos|tan|asin|acos|atan|log|log2|log10|exp|abs|floor|ceil|round|pow|min|max|PI|E)\b/g, 'Math.$1');
+      if (/[a-zA-Z_]/.test(expr.replace(/Math\.\w+/g, ''))) throw new Error('Unknown identifier');
+      return { expression, result: Function(`"use strict";return (${expr})`)() };
+    },
+  },
+  get_current_time: {
+    group: 'Compute',
+    def: { name: 'get_current_time', description: "Get the user's current local date, time and timezone.", parameters: { type: 'object', properties: {} } },
+    run: () => ({ iso: new Date().toISOString(), local: new Date().toString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+  },
+  run_javascript: {
+    group: 'Compute',
+    def: {
+      name: 'run_javascript',
+      description: 'Execute async JavaScript in the browser and return the result plus console output. Use `return` to return a value. Helpers: `await http({url, method, headers, body, format, session, save_to})` (same as http_request: full network access, returns the response object), `await files.read(path)` (string), `await files.write(path, content)`, `await files.list(path)`, `await sleep(ms)`. DOMParser is available for parsing HTML. Use for scripted multi-step scraping, parsing, and data processing. 60s timeout.',
+      parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+    },
+    run: async ({ code }) => {
+      const logs = [];
+      const cons = { log: (...a) => logs.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')) };
+      cons.error = cons.warn = cons.info = cons.log;
+      const unwrap = r => { if (r?.error) throw new Error(r.error); return r; };
+      const http = async o => unwrap(await guardedServerTool('http_request', typeof o === 'string' ? { url: o } : o));
+      const files = {
+        read: async p => { const r = unwrap(await guardedServerTool('read_file', { path: p, max_chars: 500000 })); return r.body ?? r.data ?? r; },
+        write: async (p, content, opts = {}) => unwrap(await guardedServerTool('write_file', { path: p, content: typeof content === 'string' ? content : JSON.stringify(content, null, 2), ...opts })),
+        list: async (p = '') => unwrap(await guardedServerTool('list_files', { path: p })).files,
+      };
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const fn = new Function('console', 'http', 'files', 'sleep', `"use strict"; return (async () => { ${code} })()`);
+      const result = await Promise.race([fn(cons, http, files, sleep), new Promise((_, rej) => setTimeout(() => rej(new Error('Timed out after 60s')), 60000))]);
+      return { result: result === undefined ? null : result, console: logs };
+    },
+  },
+  web_search: {
+    group: 'Web',
+    def: {
+      name: 'web_search',
+      description: 'Search the web for current information, news, facts, docs, prices, or anything after your training cutoff. Returns titles, URLs and snippets. Cite sources with links. Follow up with fetch_url to read a full page when snippets are not enough.',
+      parameters: { type: 'object', properties: {
+        query: { type: 'string', description: 'Search query, concise (under 70 characters works best).' },
+        recency: { type: 'string', enum: ['oneDay', 'oneWeek', 'oneMonth', 'oneYear', 'noLimit'], description: 'Only return pages from this time window. Use for news or recent events.' },
+        domain: { type: 'string', description: 'Restrict results to one domain, e.g. "github.com".' },
+      }, required: ['query'] },
+    },
+    run: async ({ query, recency, domain }) => {
+      const r = await api('/api/search', {
+        query, domain, provider: S.search.provider, count: S.search.count, location: S.search.location,
+        contentSize: S.search.contentSize, recency: recency || S.search.recency,
+      });
+      return r.json();
+    },
+  },
+  fetch_url: {
+    group: 'Web',
+    def: { name: 'fetch_url', description: 'Quickly read a web page as plain text (first 20k chars). For raw HTML, headers, APIs, binary files or long pages use http_request; for JavaScript-rendered sites use render_page.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+    run: async ({ url }) => (await api('/api/fetch', { url })).json(),
+  },
+  http_request: {
+    group: 'Web', server: true,
+    def: {
+      name: 'http_request',
+      description: 'Make a raw HTTP request with any method and get the unprocessed response: status, every header, the redirect chain, and the exact body. Binary responses (images, zips, PDFs, fonts, bundles) are saved to the files sandbox automatically. Long bodies are paged: call again with offset = next_offset. Use `session` to keep cookies between requests (multi-step flows, logins the user asked for).',
+      parameters: { type: 'object', properties: {
+        url: { type: 'string' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'], description: 'Default GET.' },
+        headers: { type: 'object', additionalProperties: { type: 'string' }, description: 'Request headers, e.g. {"Accept": "application/json", "Authorization": "Bearer …", "Cookie": "a=b"}. Overrides the default User-Agent if you set one.' },
+        body: { type: 'string', description: 'Request body as text (JSON, form-encoded, XML…). Set Content-Type in headers.' },
+        body_base64: { type: 'string', description: 'Binary request body, base64-encoded.' },
+        session: { type: 'string', description: 'Cookie jar name. Cookies set by responses are stored and re-sent on later requests with the same session name.' },
+        follow_redirects: { type: 'boolean', description: 'Default true. Set false to see the 3xx response itself.' },
+        format: { type: 'string', enum: ['raw', 'text', 'links', 'headers'], description: 'raw = exact body (default). text = readable text extracted from HTML. links = every link and asset URL on the page. headers = status and headers only.' },
+        offset: { type: 'integer', description: 'Character offset to start the body from (for paging long responses).' },
+        max_chars: { type: 'integer', description: 'Max body characters to return (up to 500000).' },
+        save_to: { type: 'string', description: 'Save the full response body to this path in the files sandbox, or "auto" to pick one from the URL.' },
+        timeout_ms: { type: 'integer', description: 'Default 30000, max 120000.' },
+      }, required: ['url'] },
+    },
+    run: args => callServerTool('http_request', { max_chars: S.web.maxChars, ...args, ...webOpts() }),
+  },
+  render_page: {
+    group: 'Web', server: true, needs: 'chrome',
+    def: {
+      name: 'render_page',
+      description: 'Open a URL in a real headless Chrome browser, let its JavaScript run, and return the fully rendered page. Use for single-page apps and JS-heavy sites where http_request only sees an empty shell. Can save a PNG screenshot for the user (you cannot see images yourself).',
+      parameters: { type: 'object', properties: {
+        url: { type: 'string' },
+        wait_ms: { type: 'integer', description: 'How long to let the page run JavaScript before capturing, in ms (default 5000, max 60000).' },
+        format: { type: 'string', enum: ['text', 'html', 'links'], description: 'text = readable text (default). html = full rendered DOM. links = all links and asset URLs.' },
+        screenshot: { type: 'boolean', description: 'Also save a full-width PNG screenshot to the files sandbox.' },
+        save_to: { type: 'string', description: 'Save the rendered HTML to this sandbox path, or "auto".' },
+        offset: { type: 'integer' },
+        max_chars: { type: 'integer' },
+      }, required: ['url'] },
+    },
+    run: args => callServerTool('render_page', { max_chars: S.web.maxChars, ...args, ...webOpts() }),
+  },
+  crawl_site: {
+    group: 'Web', server: true,
+    def: {
+      name: 'crawl_site',
+      description: 'Crawl a website breadth-first from a start URL: follow links, save every page (and optionally its CSS, JS, images and other assets) into the files sandbox as a mirror, and return a summary of pages with titles, status codes and saved paths. Respects robots.txt unless the user disabled it. Inspect the results afterwards with list_files / read_file.',
+      parameters: { type: 'object', properties: {
+        url: { type: 'string', description: 'Start URL.' },
+        max_pages: { type: 'integer', description: 'Stop after this many pages (default 25, max 500).' },
+        max_depth: { type: 'integer', description: 'How many links deep to follow from the start page (default 2).' },
+        include: { type: 'string', description: 'Only crawl URLs matching this regex, e.g. "/docs/".' },
+        exclude: { type: 'string', description: 'Skip URLs matching this regex, e.g. "\\?page=|/tag/".' },
+        same_origin: { type: 'boolean', description: 'Stay on the start URL\'s origin (default true).' },
+        save_assets: { type: 'boolean', description: 'Also download CSS, JS, images, fonts and linked files (default false).' },
+        session: { type: 'string', description: 'Cookie jar to use (shared with http_request).' },
+      }, required: ['url'] },
+    },
+    run: args => callServerTool('crawl_site', { ...args, ...webOpts(), respectRobots: S.web.respectRobots, delayMs: S.web.crawlDelayMs }),
+  },
+  list_files: {
+    group: 'Files', server: true,
+    def: { name: 'list_files', description: 'List everything in the files sandbox: downloads, crawls, screenshots, rendered pages, and files you wrote. Paths are relative to the sandbox root.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Folder to list (default: root).' }, recursive: { type: 'boolean', description: 'Default true.' } } } },
+    run: args => callServerTool('list_files', args),
+  },
+  read_file: {
+    group: 'Files', server: true,
+    def: { name: 'read_file', description: 'Read a file from the sandbox. Text is paged with offset / max_chars (continue from next_offset). Use encoding "base64" to read raw bytes of binary files.', parameters: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer' }, max_chars: { type: 'integer' }, encoding: { type: 'string', enum: ['utf8', 'base64'] } }, required: ['path'] } },
+    run: args => callServerTool('read_file', { max_chars: S.web.maxChars, ...args }),
+  },
+  write_file: {
+    group: 'Files', server: true,
+    def: { name: 'write_file', description: 'Create, overwrite or append to a file in the sandbox. Use for notes, extracted data (CSV/JSON), code, and reports. The user can open and download anything you write.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'e.g. "reports/summary.md"' }, content: { type: 'string' }, encoding: { type: 'string', enum: ['utf8', 'base64'], description: 'Default utf8.' }, append: { type: 'boolean' } }, required: ['path', 'content'] } },
+    run: args => callServerTool('write_file', args),
+  },
+  delete_file: {
+    group: 'Files', server: true,
+    def: { name: 'delete_file', description: 'Delete a file or folder from the sandbox.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+    run: args => callServerTool('delete_file', args),
+  },
+};
+const refreshAfter = p => p.then(r => { refreshMemory(); return r; });
+Object.assign(BUILTINS, {
+  remember: {
+    group: 'Memory', server: true,
+    def: { name: 'remember', description: "Save a short, durable fact to long-term memory. Your memories are shown to you at the start of every conversation, including future chats and autopilot runs. Save what's worth knowing later: the user's name and preferences, their projects, decisions made, and important findings or results you produced. One specific fact per memory. Don't save trivia or duplicates.", parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+    run: args => refreshAfter(callServerTool('remember', { text: args.text, source: 'glm' })),
+  },
+  update_memory: {
+    group: 'Memory', server: true,
+    def: { name: 'update_memory', description: 'Rewrite an existing memory by its id (shown in [brackets] in your memory list) when it has changed.', parameters: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' } }, required: ['id', 'text'] } },
+    run: args => refreshAfter(callServerTool('update_memory', args)),
+  },
+  forget: {
+    group: 'Memory', server: true,
+    def: { name: 'forget', description: 'Delete a memory by id when it is wrong or no longer true.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+    run: args => refreshAfter(callServerTool('forget', args)),
+  },
+  search_chats: {
+    group: 'Memory', server: true,
+    def: { name: 'search_chats', description: "Search every past conversation with the user (all chats, including autopilot runs) for words or a phrase, and get matching messages with chat ids and snippets. Leave query empty to list recent chats. Use when the user refers to something from before, or to recall what you said or found earlier.", parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer' } } } },
+    run: args => callServerTool('search_chats', { ...args, current_chat_id: currentId }),
+  },
+  read_chat: {
+    group: 'Memory', server: true,
+    def: { name: 'read_chat', description: 'Read the messages of a past conversation by chat_id (from search_chats), in pages. Continue with offset = next_offset.', parameters: { type: 'object', properties: { chat_id: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['chat_id'] } },
+    run: args => callServerTool('read_chat', args),
+  },
+});
+
+let memoryCache = [];
+async function refreshMemory() {
+  try { const r = await callServerTool('memory_list', {}); if (Array.isArray(r.memories)) memoryCache = r.memories; } catch {}
+  if (activeTab === 'memory' && !$('#panel').classList.contains('hidden')) renderPanel();
+}
+function memoryPrompt() {
+  const lines = []; let used = 0;
+  for (const m of [...memoryCache].reverse()) { // newest first until the budget runs out
+    const line = `- [${m.id}] ${m.text} (${(m.updated || m.created).slice(0, 10)}${m.source === 'user' ? ', from the user' : ''})`;
+    if (used + line.length > S.memory.maxPromptChars) break;
+    lines.unshift(line); used += line.length;
+  }
+  const hidden = memoryCache.length - lines.length;
+  const canEdit = S.tools.enabled && S.tools.builtins.remember;
+  return `## Long-term memory
+You have persistent memory that carries across every conversation with this user.${canEdit ? ' Save durable facts with `remember` (preferences, projects, decisions, key results), keep them current with `update_memory` / `forget`, and use `search_chats` / `read_chat` to look up earlier conversations when they are relevant.' : ''}
+${lines.length ? 'What you remember:\n' + lines.join('\n') : '(Nothing saved yet.)'}${hidden ? `\n(${hidden} older memories not shown.)` : ''}`;
+}
+
+const webOpts = () => ({ userAgent: S.web.userAgent || undefined, allowPrivate: S.web.allowPrivate, maxBytes: S.web.maxDownloadMB * 1e6 });
+
+/* approvals for actions with side effects */
+function needsApproval(name, args) {
+  const c = S.tools.confirm;
+  if (name === 'delete_file') return c.deletes;
+  if (name === 'write_file') return c.writes;
+  if (name === 'http_request') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
+  if (name === 'crawl_site') return c.crawls;
+  if (name === 'run_javascript') return c.js;
+  return false;
+}
+let pendingApproval = null;
+function approve(name, args) {
+  if (AUTO.running && S.auto.approvals === 'deny') { toast(`Autopilot auto-declined ${name}`); return Promise.resolve(false); }
+  if (AUTO.running && S.auto.approvals === 'allow') return Promise.resolve(true);
+  return new Promise(resolve => {
+    pendingApproval = allow => { bg.remove(); pendingApproval = null; resolve(allow); };
+    const bg = document.createElement('div'); bg.className = 'modal-bg';
+    bg.innerHTML = `<div class="modal"><header><span>Allow GLM to run <code>${esc(name)}</code>?</span></header><pre>${esc(JSON.stringify(args, null, 2))}</pre>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--border)"><button class="btn" data-a="deny">Deny</button><button class="btn primary" data-a="allow">Allow</button></div></div>`;
+    bg.onclick = e => { const a = e.target.dataset.a; if (a) pendingApproval(a === 'allow'); };
+    document.body.appendChild(bg);
+    $('[data-a="allow"]', bg).focus();
+  });
+}
+// In autopilot, optionally block anything that changes state on other websites.
+function autopilotBlock(name, args) {
+  if (AUTO.running && S.auto.readOnlyWeb && name === 'http_request' && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase()))
+    return { error: 'Blocked: autopilot is in read-only web mode (no POST/PUT/PATCH/DELETE). Find a read-only way or move on.' };
+}
+async function guardedServerTool(name, args) {
+  const blocked = autopilotBlock(name, args); if (blocked) return blocked;
+  if (needsApproval(name, args) && !(await approve(name, args))) return { error: 'The user declined this action.' };
+  const extra = name === 'http_request' ? { max_chars: S.web.maxChars, ...args, ...webOpts() } : args;
+  return callServerTool(name, extra);
+}
+
+function activeTools() {
+  if (!S.tools.enabled) return [];
+  const list = [];
+  for (const [k, on] of Object.entries(S.tools.builtins)) {
+    if (!on || !BUILTINS[k]) continue;
+    if (BUILTINS[k].needs && !caps[BUILTINS[k].needs]) continue;
+    const def = { ...BUILTINS[k].def };
+    // the model has no clock; give search a sense of "now" for queries like "this week"
+    if (k === 'web_search') def.description += ` Today's date is ${new Date().toDateString()}.`;
+    list.push({ type: 'function', function: def });
+  }
+  for (const t of S.tools.custom) {
+    if (!t.enabled || !t.name) continue;
+    let params; try { params = JSON.parse(t.parameters || '{}'); } catch { params = { type: 'object', properties: {} }; }
+    list.push({ type: 'function', function: { name: t.name, description: t.description, parameters: params } });
+  }
+  return list;
+}
+
+async function executeTool(call) {
+  const name = call.function.name;
+  let args = {};
+  try { args = JSON.parse(call.function.arguments || '{}'); } catch { return { error: 'Arguments were not valid JSON: ' + call.function.arguments }; }
+  try {
+    if (BUILTINS[name] && S.tools.builtins[name]) {
+      const blocked = autopilotBlock(name, args); if (blocked) return blocked;
+      if (needsApproval(name, args) && !(await approve(name, args))) return { error: 'The user declined this action.' };
+      return await BUILTINS[name].run(args);
+    }
+    const custom = S.tools.custom.find(t => t.name === name && t.enabled);
+    if (custom) return await new Function('args', `"use strict"; return (async () => { ${custom.handler} })()`)(args);
+    return { error: `No handler for tool "${name}"` };
+  } catch (e) { return { error: e.message }; }
+}
+
+/* =========================================================
+   API
+   ========================================================= */
+// Long runs pile up tool output. Trim the oldest big results (in the request only; the chat keeps
+// everything) until the conversation fits the budget. The latest messages are never touched.
+function trimContext(messages) {
+  const budget = +S.contextChars || 400000;
+  const size = m => (m.content?.length || 0) + (m.reasoning_content?.length || 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
+  let total = messages.reduce((a, m) => a + size(m), 0), trimmed = 0;
+  const keep = messages.length - 8;
+  for (let i = 1; i < keep && total > budget; i++) {
+    if (messages[i].reasoning_content) { total -= messages[i].reasoning_content.length; delete messages[i].reasoning_content; trimmed++; }
+  }
+  for (const [role, limit] of [['tool', 1200], ['assistant', 1500], ['user', 3000]]) {
+    for (let i = 1; i < keep && total > budget; i++) {
+      const m = messages[i];
+      if (m.role !== role || (m.content?.length || 0) <= limit + 200) continue;
+      const cut = m.content.slice(0, limit) + `\n…[${m.content.length - limit} chars trimmed to fit context. Re-run the tool or read the saved file if you need it again.]`;
+      total -= m.content.length - cut.length; m.content = cut; trimmed++;
+    }
+  }
+  return trimmed;
+}
+
+function buildRequest(history, chat) {
+  const messages = [];
+  const system = [S.system.trim(), S.memory.enabled ? memoryPrompt() : '', chat?.autopilot ? autopilotPrompt(chat.autopilot) : ''].filter(Boolean).join('\n\n');
+  if (system) messages.push({ role: 'system', content: system });
+  // tool calls that never got a result (e.g. a cycle hit its round limit) would make the API reject the request
+  const answered = new Set(history.filter(m => m.role === 'tool').map(m => m.tool_call_id));
+  for (const m of history) {
+    if (m.error || m.note) continue;
+    if (m.role === 'user') messages.push({ role: 'user', content: m.content + (m.autoNote ? '\n\n' + m.autoNote : '') });
+    else if (m.role === 'assistant') {
+      const o = { role: 'assistant', content: m.content || '' };
+      const calls = (m.tool_calls || []).filter(t => answered.has(t.id));
+      // send its own earlier thinking back so it stays consistent with what it decided
+      if (S.memory.keepReasoning && m.reasoning) o.reasoning_content = m.reasoning;
+      if (calls.length) o.tool_calls = calls.map(({ id, type, function: f }) => ({ id, type, function: f }));
+      if (!o.content && !calls.length) continue;
+      messages.push(o);
+    } else if (m.role === 'tool') messages.push({ role: 'tool', tool_call_id: m.tool_call_id, content: m.content });
+  }
+  const body = { model: S.model, messages, stream: S.stream, temperature: +S.temperature, top_p: +S.top_p, thinking: { type: S.thinking ? 'enabled' : 'disabled', ...(S.thinking && S.memory.keepReasoning ? { clear_thinking: false } : {}) } };
+  if (S.max_tokens) body.max_tokens = +S.max_tokens;
+  const stops = S.stop.split(',').map(s => s.trim()).filter(Boolean);
+  if (stops.length) body.stop = stops;
+  if (S.jsonMode) body.response_format = { type: 'json_object' };
+  const tools = activeTools();
+  if (tools.length) { body.tools = tools; body.tool_choice = S.tools.toolChoice; }
+  try { Object.assign(body, JSON.parse(S.extra || '{}')); } catch {}
+  buildRequest.trimmed = trimContext(body.messages);
+  return body;
+}
+
+async function callModel(chat, msg) {
+  const body = buildRequest(chat.messages.slice(0, chat.messages.indexOf(msg)), chat);
+  if (buildRequest.trimmed) msg.meta.trimmed = buildRequest.trimmed;
+  const log = { request: body, raw: [] };
+  requestLog.set(msg.id, log);
+  // each entry holds a full request body; keep only recent ones so long runs don't eat memory
+  while (requestLog.size > 25) requestLog.delete(requestLog.keys().next().value);
+  const t0 = performance.now(); let tFirst = null, tThinkEnd = null;
+  abortCtl = new AbortController();
+  const res = await fetch('/api/chat', { method: 'POST', headers: { ...API_HEADERS, 'X-Endpoint': S.endpoint }, body: JSON.stringify(body), signal: abortCtl.signal });
+  const ctype = res.headers.get('content-type') || '';
+  if (!res.ok || !ctype.includes('event-stream')) {
+    const j = await res.json().catch(() => ({ error: { message: `HTTP ${res.status}` } }));
+    log.raw.push(j);
+    if (j.error || !res.ok) throw new Error(`${j.error?.code ? '[' + j.error.code + '] ' : ''}${j.error?.message || 'HTTP ' + res.status}`);
+    const m = j.choices?.[0]?.message || {};
+    msg.content = m.content || ''; msg.reasoning = m.reasoning_content || '';
+    msg.tool_calls = m.tool_calls || [];
+    msg.meta.finish = j.choices?.[0]?.finish_reason; msg.meta.usage = j.usage;
+    msg.meta.total = (performance.now() - t0) / 1000;
+    return;
+  }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  const tick = rafThrottle(() => renderStreaming(msg));
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line.startsWith('data:')) continue;
+      const d = line.slice(5).trim();
+      if (d === '[DONE]') continue;
+      let j; try { j = JSON.parse(d); } catch { continue; }
+      log.raw.push(j);
+      if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+      const ch = j.choices?.[0]; const delta = ch?.delta || {};
+      if (delta.reasoning_content) { tFirst ??= performance.now(); msg.reasoning += delta.reasoning_content; }
+      if (delta.content) { tFirst ??= performance.now(); if (msg.reasoning && !tThinkEnd) tThinkEnd = performance.now(); msg.content += delta.content; }
+      for (const tc of delta.tool_calls || []) {
+        tFirst ??= performance.now();
+        const idx = tc.index ?? msg.tool_calls.length;
+        const t = msg.tool_calls[idx] ||= { id: '', type: 'function', function: { name: '', arguments: '' } };
+        if (tc.id) t.id = tc.id;
+        if (tc.function?.name) t.function.name = t.function.name && t.function.name !== tc.function.name ? t.function.name + tc.function.name : tc.function.name;
+        if (tc.function?.arguments) t.function.arguments += tc.function.arguments;
+      }
+      if (ch?.finish_reason) msg.meta.finish = ch.finish_reason;
+      if (j.usage) msg.meta.usage = j.usage;
+      tick();
+    }
+  }
+  const end = performance.now();
+  msg.meta.ttft = tFirst ? (tFirst - t0) / 1000 : null;
+  msg.meta.total = (end - t0) / 1000;
+  if (tThinkEnd && tFirst) msg.meta.thinkTime = (tThinkEnd - tFirst) / 1000;
+  const out = msg.meta.usage?.completion_tokens;
+  // if output arrived in one burst, fall back to total time so the rate isn't absurd
+  if (out) msg.meta.tps = out / ((tFirst && end - tFirst > 300 ? end - tFirst : end - t0) / 1000);
+}
+
+function rafThrottle(fn) { let q = false; return () => { if (q) return; q = true; requestAnimationFrame(() => { q = false; fn(); }); }; }
+
+async function runTurn(chat, round = 0, maxRounds = S.tools.maxRounds) {
+  // mid-cycle during autopilot: hand GLM anything you typed right away instead of waiting for the next cycle
+  if (AUTO.running && round > 0 && AUTO.inbox.length) {
+    chat.messages.push({ id: uid(), role: 'user', content: AUTO.inbox.splice(0).join('\n\n') });
+    updateAutoBar();
+  }
+  const msg = { id: uid(), role: 'assistant', content: '', reasoning: '', tool_calls: [], meta: { model: S.model } };
+  chat.messages.push(msg);
+  renderMessages(); setBusy(true);
+  try {
+    await callModel(chat, msg);
+  } catch (e) {
+    if (e.name === 'AbortError') msg.meta.stopped = true;
+    else { msg.error = e.message; }
+  } finally {
+    msg.tool_calls = msg.tool_calls.filter(Boolean);
+    chat.updated = Date.now(); saveChats();
+  }
+  renderMessages();
+  if (!msg.error && !msg.meta.stopped && msg.tool_calls.length) {
+    if ((S.tools.autoRun || AUTO.running) && round < maxRounds) {
+      await runToolCalls(chat, msg);
+      return runTurn(chat, round + 1, maxRounds);
+    }
+    if (round >= maxRounds && !AUTO.running) toast(`Stopped after ${maxRounds} tool rounds`);
+  }
+  setBusy(false);
+  renderMessages(); // drop the streaming cursor
+}
+
+async function runToolCalls(chat, msg) {
+  for (const call of msg.tool_calls) {
+    if (chat.messages.some(m => m.role === 'tool' && m.tool_call_id === call.id)) continue;
+    setStatus(`Running ${call.function.name}…`);
+    const t0 = performance.now();
+    const result = await executeTool(call);
+    chat.messages.push({ id: uid(), role: 'tool', tool_call_id: call.id, name: call.function.name, content: typeof result === 'string' ? result : JSON.stringify(result, null, 2), meta: { ms: performance.now() - t0, error: !!result?.error } });
+    renderMessages(); saveChats();
+    if (activeTab === 'files' && !$('#panel').classList.contains('hidden')) loadFileTree();
+  }
+  setStatus('');
+}
+
+/* =========================================================
+   Autopilot: GLM runs on its own in cycles
+   ========================================================= */
+const AUTO_PROMPT_DEFAULT = `## AUTOPILOT MODE
+You are running autonomously. No human is watching in real time; the user will review your work later. Messages starting with [Autopilot] are automatic ticks, not a person: keep going on your own. Any other user message is the real user stepping in, so prioritize it.
+
+Mission: {mission}
+
+How to work:
+- First cycle: read autopilot/journal.md if it exists (your memory from earlier runs), then state a concrete plan.
+- Every cycle, make real progress with your tools. Don't just describe what you'll do. Do it.
+- Save your work in the files sandbox under autopilot/<project-name>/. Append a short dated entry to autopilot/journal.md each cycle: what you did, what you learned, what's next.
+- End each cycle with a two-line status: "DONE:" and "NEXT:".
+- {finish_rule}
+
+Limits:
+- {web_rule}
+- Never sign up for accounts, log in, post or comment publicly, message people, or buy anything.
+- Respect robots.txt and rate limits. Don't crawl or fetch more than you need.
+- Never try to get around CAPTCHAs, paywalls, or access controls.
+- If an action is declined or blocked, adapt and move on.
+- {budget}`;
+const FREE_MISSION = 'Your choice. You have free time, a sandbox, and real tools. Pick something you find genuinely interesting or useful (research a question in depth, investigate something on the web, build a small program or dataset, write something) and pursue it properly. You may change direction if something better comes up.';
+
+function autopilotPrompt(a) {
+  return (S.auto.prompt || AUTO_PROMPT_DEFAULT)
+    .replaceAll('{mission}', a.goal || FREE_MISSION)
+    .replaceAll('{web_rule}', a.readOnlyWeb ? 'You are read-only on the web: GET requests only. POST/PUT/PATCH/DELETE are blocked.' : 'Prefer read-only web access. Only send data to a site when the mission clearly needs it.')
+    .replaceAll('{finish_rule}', a.unlimited
+      ? 'There is no finish line. When a project is done, summarize it in the journal and start the next worthwhile one. Only put AUTOPILOT_DONE on its own line if the mission has a clear end and it is fully complete.'
+      : 'When the mission is complete, or you truly have nothing worthwhile left, write a final summary to the journal and put AUTOPILOT_DONE on its own line.')
+    .replaceAll('{budget}', a.unlimited ? 'Budget: unlimited. You run until the user stops you, so pace yourself and keep the work high quality.' : `Budget: ${a.maxCycles} cycles, ${a.minutes} minutes.`)
+    .replaceAll('{max_cycles}', a.unlimited ? 'unlimited' : a.maxCycles).replaceAll('{minutes}', a.unlimited ? 'unlimited' : a.minutes);
+}
+
+const AUTO = { running: false, paused: false, stop: false, chat: null, cycle: 0, started: 0, deadline: 0, inbox: [], phase: '', wakeLock: null, timer: null };
+
+function autoTokens() {
+  return (AUTO.chat?.messages || []).filter(m => m.role === 'assistant' && m.meta?.at >= AUTO.started)
+    .reduce((a, m) => a + (m.meta.usage?.total_tokens || 0), 0);
+}
+function updateAutoBar() {
+  const bar = $('#autoBar');
+  bar.hidden = !AUTO.running;
+  $('#autoChip').classList.toggle('on', AUTO.running);
+  $('#autoChip').textContent = AUTO.running ? `🤖 ${AUTO.cycle}/${S.auto.unlimited ? '∞' : S.auto.maxCycles}` : '🤖 Autopilot';
+  if (!AUTO.running) return;
+  bar.classList.toggle('paused', AUTO.paused);
+  $('#autoPause').textContent = AUTO.paused ? 'Resume' : 'Pause';
+  const tok = autoTokens();
+  const elapsed = Math.round((Date.now() - AUTO.started) / 60000);
+  $('#autoStatus').textContent = [
+    S.auto.unlimited ? `cycle ${AUTO.cycle} · no limit · ${elapsed} min running` : `cycle ${AUTO.cycle}/${S.auto.maxCycles} · ${Math.max(0, Math.round((AUTO.deadline - Date.now()) / 60000))} min left`, tok ? `${(tok / 1000).toFixed(1)}k tokens` : '',
+    AUTO.paused ? 'paused' : AUTO.phase, AUTO.inbox.length ? `${AUTO.inbox.length} message${AUTO.inbox.length > 1 ? 's' : ''} queued` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+// Sleep in small steps so Stop / Pause / new messages take effect quickly.
+async function autoSleep(ms, label) {
+  const end = Date.now() + ms;
+  while (!AUTO.stop && (AUTO.paused || Date.now() < end)) {
+    if (!AUTO.paused && AUTO.inbox.length) break;
+    AUTO.phase = AUTO.paused ? '' : `${label} ${Math.ceil((end - Date.now()) / 1000)}s`;
+    updateAutoBar();
+    await new Promise(r => setTimeout(r, 400));
+  }
+}
+
+async function runAutopilot(cfg) {
+  if (AUTO.running || busy) return;
+  Object.assign(S.auto, cfg); S.tools.enabled = true; saveSettings(); renderHeader();
+  let chat = cur();
+  if (cfg.newChat || !chat) {
+    newChat(); chat = cur();
+    chat.title = '🤖 ' + (cfg.goal ? cfg.goal.replace(/\s+/g, ' ').slice(0, 40) : 'Free roam') + ' · ' + new Date().toLocaleDateString();
+  }
+  chat.autopilot = { goal: cfg.goal, unlimited: cfg.unlimited, maxCycles: cfg.maxCycles, minutes: cfg.minutes, readOnlyWeb: cfg.readOnlyWeb, startedAt: Date.now() };
+  Object.assign(AUTO, { running: true, paused: false, stop: false, chat, cycle: 0, started: Date.now(), deadline: cfg.unlimited ? Infinity : Date.now() + cfg.minutes * 60000, inbox: [], phase: 'starting' });
+  try { AUTO.wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+  AUTO.timer = setInterval(updateAutoBar, 1000);
+  document.title = '🤖 GLM Workspace';
+  renderAll(); updateAutoBar();
+
+  let reason = 'stopped', errors = 0;
+  while (true) {
+    if (AUTO.stop) { reason = 'you stopped it'; break; }
+    if (!cfg.unlimited && AUTO.cycle >= cfg.maxCycles) { reason = `reached ${cfg.maxCycles} cycles`; break; }
+    if (Date.now() > AUTO.deadline) { reason = `reached the ${cfg.minutes} min time limit`; break; }
+    AUTO.cycle++;
+    const minsLeft = Math.max(0, Math.round((AUTO.deadline - Date.now()) / 60000));
+    const budget = cfg.unlimited ? `Cycle ${AUTO.cycle} · no limit` : `Cycle ${AUTO.cycle}/${cfg.maxCycles} · ${minsLeft} min left`;
+    const tick = `[Autopilot] ${AUTO.cycle === 1 ? 'Start.' : 'Continue.'} ${budget} · ${new Date().toLocaleString()}.`;
+    const inbox = AUTO.inbox.splice(0);
+    if (inbox.length) chat.messages.push({ id: uid(), role: 'user', content: inbox.join('\n\n'), autoNote: tick });
+    else chat.messages.push({ id: uid(), role: 'user', auto: true, content: tick });
+    chat.updated = Date.now(); saveChats();
+    if (currentId === chat.id) renderMessages();
+    AUTO.phase = 'working'; updateAutoBar();
+
+    const before = chat.messages.length;
+    await runTurn(chat, 0, S.auto.roundsPerCycle);
+    chat.messages.slice(before).forEach(m => { if (m.role === 'assistant') m.meta.at ??= Date.now(); });
+    const last = [...chat.messages].reverse().find(m => m.role === 'assistant');
+
+    if (last?.error) {
+      // rate limits / quota: wait it out (longer in no-limit mode) instead of giving up
+      errors++;
+      const maxErrors = cfg.unlimited ? 10 : 3;
+      if (errors >= maxErrors) { reason = `${maxErrors} errors in a row (${last.error})`; break; }
+      const limited = /rate|limit|quota|1302|1303|1304|1305|1308|429|concurren/i.test(last.error);
+      const wait = Math.min((limited ? 60000 : 30000) * 2 ** (errors - 1), cfg.unlimited ? 900000 : 300000);
+      await autoSleep(wait, limited ? 'rate limited, retrying in' : 'error, retrying in');
+      continue;
+    }
+    errors = 0;
+    if (/^\s*AUTOPILOT_DONE\s*$/m.test(last?.content || '')) { reason = 'GLM says the mission is complete'; break; }
+    await autoSleep(S.auto.pauseSec * 1000, 'next cycle in');
+  }
+
+  const tokens = autoTokens(), mins = ((Date.now() - AUTO.started) / 60000).toFixed(1);
+  chat.messages.push({ id: uid(), role: 'user', note: true, content: `🤖 Autopilot finished: ${reason}. ${AUTO.cycle} cycles · ${mins} min · ${(tokens / 1000).toFixed(1)}k tokens` });
+  chat.autopilot.endedAt = Date.now(); chat.autopilot.reason = reason;
+  clearInterval(AUTO.timer);
+  try { await AUTO.wakeLock?.release(); } catch {}
+  Object.assign(AUTO, { running: false, paused: false, stop: false, phase: '', wakeLock: null });
+  saveChats(); renderAll(); updateAutoBar();
+  document.title = '✅ Autopilot done · GLM Workspace';
+  toast(`Autopilot finished: ${reason}`);
+}
+
+function stopAutopilot() {
+  if (!AUTO.running) return;
+  AUTO.stop = true; AUTO.paused = false;
+  abortCtl?.abort();
+  pendingApproval?.(false);
+  AUTO.phase = 'stopping'; updateAutoBar();
+}
+
+function openAutopilotDialog() {
+  if (AUTO.running) { if (confirm('Stop autopilot?')) stopAutopilot(); return; }
+  if (busy) { toast('Wait for the current reply to finish'); return; }
+  const a = S.auto;
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal">
+    <header><span>🤖 Autopilot</span><button class="icon-btn" data-a="close">✕</button></header>
+    <div class="auto-form">
+      <label class="f"><span>Mission</span><textarea id="apGoal" rows="3" placeholder="Leave empty and GLM decides what to do on its own.">${esc(a.goal)}</textarea></label>
+      <label class="check"><input type="checkbox" id="apUnlimited" ${a.unlimited ? 'checked' : ''}><span><b>No limit</b><small>No cycle cap and no time limit. Runs until you press Stop. Rate-limit errors make it wait and retry instead of quitting.</small></span></label>
+      <div class="grid" id="apLimits" style="${a.unlimited ? 'opacity:.4;pointer-events:none' : ''}">
+        <label class="f"><span>Max cycles</span><input type="number" id="apCycles" min="1" max="500" value="${a.maxCycles}"></label>
+        <label class="f"><span>Time limit (min)</span><input type="number" id="apMinutes" min="1" max="1440" value="${a.minutes}"></label>
+      </div>
+      <div class="grid">
+        <label class="f"><span>Pause between cycles (s)</span><input type="number" id="apPause" min="0" max="3600" value="${a.pauseSec}"></label>
+        <label class="f"><span>Tool rounds per cycle</span><input type="number" id="apRounds" min="1" max="50" value="${a.roundsPerCycle}"></label>
+      </div>
+      <label class="f"><span>When an action needs approval (per your Tools settings)</span>
+        <select id="apApprovals">
+          <option value="deny" ${a.approvals === 'deny' ? 'selected' : ''}>Decline it automatically and keep going</option>
+          <option value="ask" ${a.approvals === 'ask' ? 'selected' : ''}>Pause and ask me</option>
+          <option value="allow" ${a.approvals === 'allow' ? 'selected' : ''}>Approve it automatically</option>
+        </select></label>
+      <label class="check"><input type="checkbox" id="apReadOnly" ${a.readOnlyWeb ? 'checked' : ''}><span>Read-only web<small>Block POST, PUT, PATCH and DELETE requests so GLM can't submit or change anything on other sites.</small></span></label>
+      <label class="check"><input type="checkbox" id="apNewChat" ${a.newChat ? 'checked' : ''}><span>Start in a new chat<small>Otherwise it continues the current chat.</small></span></label>
+      <details style="margin-top:10px"><summary style="cursor:pointer;font-size:.85em;color:var(--muted)">Advanced: autopilot instructions</summary>
+        <div class="help" style="font-size:.78em;color:var(--muted);margin:6px 0">Added to the system prompt during autopilot. Placeholders: {mission} {web_rule} {finish_rule} {budget}.</div>
+        <textarea id="apPrompt" rows="12" spellcheck="false" style="font-family:var(--mono);font-size:.8em">${esc(a.prompt || AUTO_PROMPT_DEFAULT)}</textarea>
+        <button class="btn sm" data-a="resetPrompt" style="margin-top:6px">Reset to default</button>
+      </details>
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-top:12px">Runs in this browser tab, so keep it open and your Mac awake. Each cycle is one or more model calls against your Coding Plan quota. You can type in the chat while it runs; GLM reads your message at its next step.</div>
+    </div>
+    <footer><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="start">▶ Start autopilot</button></footer>
+  </div>`;
+  bg.onchange = e => {
+    if (e.target.id === 'apUnlimited') $('#apLimits', bg).style.cssText = e.target.checked ? 'opacity:.4;pointer-events:none' : '';
+  };
+  bg.onclick = e => {
+    const act = e.target.dataset.a;
+    if (e.target === bg || act === 'close') return bg.remove();
+    if (act === 'resetPrompt') { $('#apPrompt', bg).value = AUTO_PROMPT_DEFAULT; return; }
+    if (act !== 'start') return;
+    const num = (id, d) => Math.max(1, parseInt($(id, bg).value, 10) || d);
+    const prompt = $('#apPrompt', bg).value.trim();
+    const cfg = {
+      unlimited: $('#apUnlimited', bg).checked,
+      goal: $('#apGoal', bg).value.trim(), maxCycles: num('#apCycles', 20), minutes: num('#apMinutes', 30),
+      pauseSec: Math.max(0, parseInt($('#apPause', bg).value, 10) || 0), roundsPerCycle: num('#apRounds', 10),
+      approvals: $('#apApprovals', bg).value, readOnlyWeb: $('#apReadOnly', bg).checked, newChat: $('#apNewChat', bg).checked,
+      prompt: prompt === AUTO_PROMPT_DEFAULT.trim() ? '' : prompt,
+    };
+    bg.remove();
+    runAutopilot(cfg);
+  };
+  document.body.appendChild(bg);
+  $('#apGoal', bg).focus();
+}
+
+/* =========================================================
+   Actions
+   ========================================================= */
+function newChat() {
+  const c = { id: uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now() };
+  chats.unshift(c); currentId = c.id; saveChats(); renderAll();
+  $('#input').focus();
+}
+
+async function send() {
+  if (AUTO.running) {
+    const text = $('#input').value.trim(); if (!text) return;
+    AUTO.inbox.push(text); $('#input').value = ''; autosize(); updateEstimate(); refreshSendBtn();
+    toast(busy ? 'GLM will read this at its next step' : 'Sending to GLM…');
+    updateAutoBar(); return;
+  }
+  if (busy) return;
+  let text = $('#input').value.trim();
+  if (!text && !attachments.length) return;
+  if (attachments.length) {
+    text += (text ? '\n\n' : '') + attachments.map(a => `**${a.name}**\n\`\`\`${a.ext}\n${a.text}\n\`\`\``).join('\n\n');
+    attachments = []; renderAttachments();
+  }
+  if (!cur()) newChat();
+  const chat = cur();
+  chat.messages.push({ id: uid(), role: 'user', content: text });
+  if (chat.title === 'New chat') chat.title = text.replace(/\s+/g, ' ').slice(0, 48);
+  $('#input').value = ''; autosize(); updateEstimate();
+  renderAll();
+  await runTurn(chat);
+}
+
+async function continueToolsManually(msgId) {
+  const chat = cur(); const msg = chat.messages.find(m => m.id === msgId);
+  if (!msg || busy) return;
+  setBusy(true);
+  await runToolCalls(chat, msg);
+  await runTurn(chat);
+}
+
+function regenerate(msgId) {
+  if (busy) return;
+  const chat = cur();
+  let i = chat.messages.findIndex(m => m.id === msgId);
+  // walk back to the user message that started this turn
+  while (i > 0 && chat.messages[i - 1].role !== 'user') i--;
+  chat.messages.splice(i);
+  saveChats(); runTurn(chat);
+}
+
+function deleteMsg(msgId) {
+  const chat = cur();
+  const i = chat.messages.findIndex(m => m.id === msgId);
+  const m = chat.messages[i];
+  let n = 1;
+  // deleting an assistant msg with tool calls also removes its tool results
+  if (m.role === 'assistant') while (chat.messages[i + n]?.role === 'tool') n++;
+  chat.messages.splice(i, n); saveChats(); renderMessages();
+}
+
+function editMsg(msgId) {
+  if (busy) return;
+  const el = $(`.msg[data-id="${msgId}"] .bubble`);
+  const chat = cur(); const m = chat.messages.find(x => x.id === msgId);
+  el.innerHTML = `<textarea class="edit-area">${esc(m.content)}</textarea>
+    <div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">
+      <button class="btn sm" data-a="cancel">Cancel</button>
+      ${m.role === 'user' ? '<button class="btn sm primary" data-a="resend">Save & resend</button>' : ''}
+      <button class="btn sm" data-a="save">Save</button></div>`;
+  const ta = $('textarea', el); ta.focus(); ta.style.height = ta.scrollHeight + 'px';
+  el.onclick = e => {
+    const a = e.target.dataset.a; if (!a) return;
+    if (a === 'cancel') return renderMessages();
+    m.content = ta.value;
+    if (a === 'resend') { chat.messages.splice(chat.messages.indexOf(m) + 1); saveChats(); renderMessages(); runTurn(chat); }
+    else { saveChats(); renderMessages(); }
+  };
+}
+
+function showRaw(msgId) {
+  const log = requestLog.get(msgId);
+  const chat = cur(); const m = chat.messages.find(x => x.id === msgId);
+  const content = log
+    ? `// REQUEST\n${JSON.stringify(log.request, null, 2)}\n\n// RESPONSE (${log.raw.length} chunk${log.raw.length === 1 ? '' : 's'})\n${JSON.stringify(log.raw.length > 40 ? [...log.raw.slice(0, 20), `… ${log.raw.length - 40} chunks …`, ...log.raw.slice(-20)] : log.raw, null, 2)}`
+    : `// Request log is kept in memory for this page session only.\n// Stored message:\n${JSON.stringify(m, null, 2)}`;
+  modal('Raw request / response', content);
+}
+
+function modal(title, text) {
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal"><header>${esc(title)}<span><button class="btn sm" data-a="copy">Copy</button> <button class="btn sm" data-a="close">Close</button></span></header><pre>${esc(text)}</pre></div>`;
+  bg.onclick = e => {
+    if (e.target === bg || e.target.dataset.a === 'close') bg.remove();
+    if (e.target.dataset.a === 'copy') { navigator.clipboard.writeText(text); toast('Copied'); }
+  };
+  document.body.appendChild(bg);
+}
+
+function download(name, text, type = 'application/json') {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+
+function chatToMarkdown(c) {
+  let md = `# ${c.title}\n\n_Model: ${S.model} · exported ${new Date().toLocaleString()}_\n\n`;
+  if (S.system) md += `> **System:** ${S.system.replace(/\n/g, '\n> ')}\n\n`;
+  for (const m of c.messages) {
+    if (m.role === 'user') md += `## 🧑 User\n\n${m.content}\n\n`;
+    else if (m.role === 'assistant') {
+      md += `## 🤖 Assistant\n\n`;
+      if (m.reasoning) md += `<details><summary>Thinking</summary>\n\n${m.reasoning}\n\n</details>\n\n`;
+      md += (m.content || '') + '\n\n';
+      for (const t of m.tool_calls || []) md += `🔧 \`${t.function.name}(${t.function.arguments})\`\n\n`;
+    } else if (m.role === 'tool') md += `**Tool result (${m.name}):**\n\`\`\`json\n${m.content}\n\`\`\`\n\n`;
+  }
+  return md;
+}
+
+/* =========================================================
+   Rendering
+   ========================================================= */
+marked.setOptions({ gfm: true, breaks: false });
+function renderMd(text, el) {
+  el.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
+  $$('a[href]', el).forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+  $$('pre code', el).forEach(code => {
+    const pre = code.parentElement;
+    const lang = (code.className.match(/language-(\S+)/) || [])[1];
+    try { hljs.highlightElement(code); } catch {}
+    if (lang) { pre.classList.add('has-lang'); pre.insertAdjacentHTML('afterbegin', `<span class="code-lang">${esc(lang)}</span>`); }
+    const b = document.createElement('button'); b.className = 'copy-code'; b.textContent = 'Copy';
+    b.onclick = () => { navigator.clipboard.writeText(code.innerText); b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1200); };
+    pre.appendChild(b);
+  });
+  if (window.renderMathInElement) try {
+    renderMathInElement(el, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\[', right: '\\]', display: true }, { left: '$', right: '$', display: false }, { left: '\\(', right: '\\)', display: false }], throwOnError: false });
+  } catch {}
+}
+
+function metaLine(m) {
+  if (!S.look.showMeta) return '';
+  const p = [m.meta?.model];
+  const u = m.meta?.usage;
+  if (u) {
+    p.push(`${u.prompt_tokens ?? '?'} in / ${u.completion_tokens ?? '?'} out`);
+    const r = u.completion_tokens_details?.reasoning_tokens; if (r) p.push(`${r} reasoning`);
+    const c = u.prompt_tokens_details?.cached_tokens; if (c) p.push(`${c} cached`);
+  }
+  if (m.meta?.tps) p.push(`${m.meta.tps.toFixed(1)} tok/s`);
+  if (m.meta?.ttft != null) p.push(`TTFT ${m.meta.ttft.toFixed(2)}s`);
+  if (m.meta?.total) p.push(`${m.meta.total.toFixed(1)}s total`);
+  if (m.meta?.finish && m.meta.finish !== 'stop') p.push(`finish: ${m.meta.finish}`);
+  if (m.meta?.stopped) p.push('stopped');
+  if (m.meta?.trimmed) p.push(`${m.meta.trimmed} old msgs trimmed`);
+  return p.filter(Boolean).join(' · ');
+}
+
+const fileUrl = p => '/files/' + p.split('/').map(encodeURIComponent).join('/');
+const zipUrl = p => '/api/zip?path=' + encodeURIComponent(p);
+function fmtBytes(n) { if (n == null) return ''; const u = ['B', 'KB', 'MB', 'GB']; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + ' ' + u[i]; }
+
+// Links to whatever a tool saved into the sandbox, plus an inline screenshot preview.
+function fileLinksHTML(m) {
+  let d; try { d = JSON.parse(m.content); } catch { return ''; }
+  if (!d || typeof d !== 'object') return '';
+  const items = [];
+  if (d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank">📄 ${esc(d.saved_to)}</a> <a href="${fileUrl(d.saved_to)}?download" title="Download">⤓</a>`);
+  if (m.name === 'write_file' && d.path) items.push(`<a href="${fileUrl(d.path)}" target="_blank">📄 ${esc(d.path)}</a> <a href="${fileUrl(d.path)}?download" title="Download">⤓</a>`);
+  if (d.output_dir) items.push(`📁 ${esc(d.output_dir)} <a href="${zipUrl(d.output_dir)}">⤓ download .zip</a>`);
+  if (d.screenshot_saved_to) items.push(`<a href="${fileUrl(d.screenshot_saved_to)}" target="_blank">🖼 ${esc(d.screenshot_saved_to)}</a><br><a href="${fileUrl(d.screenshot_saved_to)}" target="_blank"><img class="shot" src="${fileUrl(d.screenshot_saved_to)}" alt="screenshot"></a>`);
+  return items.length ? `<div class="file-links">${items.join('<br>')}</div>` : '';
+}
+
+function searchResultsHTML(m) {
+  let d; try { d = JSON.parse(m.content); } catch { return null; }
+  if (!Array.isArray(d.results)) return null;
+  const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+  const items = d.results.map(r => `<li>
+      ${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title || r.url)}</a>` : `<span>${esc(r.title || '(untitled)')}</span>`}
+      <span class="sr-site">${esc(r.site || host(r.url))}${r.date ? ' · ' + esc(r.date) : ''}</span>
+      ${r.snippet ? `<div class="sr-snip">${esc(r.snippet.length > 240 ? r.snippet.slice(0, 240) + '…' : r.snippet)}</div>` : ''}</li>`).join('');
+  return `<div class="msg tool" data-id="${m.id}"><details class="tool-card search-card"${S.look.expandSearch ? ' open' : ''}>
+    <summary class="head">🌐 “${esc(d.query)}” <span class="badge ok">${d.results.length} results</span><span class="meta">${esc(d.provider || '')}${d.took_ms ? ' · ' + d.took_ms + 'ms' : ''}</span></summary>
+    <ol class="sr-list">${items || '<li class="sr-snip">No results.</li>'}</ol></details></div>`;
+}
+
+function toolCallCards(m, chat) {
+  return (m.tool_calls || []).map(tc => {
+    let args = tc.function.arguments; try { args = JSON.stringify(JSON.parse(args), null, 2); } catch {}
+    const answered = chat.messages.some(x => x.role === 'tool' && x.tool_call_id === tc.id);
+    const pending = !answered && !busy && m.meta?.finish === 'tool_calls';
+    return `<div class="tool-card"><div class="head">${tc.function.name === 'web_search' ? '🌐' : '🔧'} ${esc(tc.function.name)} <span class="badge">call</span></div><pre>${esc(args)}</pre>
+      ${pending ? `<div class="pending-actions"><button class="btn sm primary" data-act="runtools" data-id="${m.id}">Run tools & continue</button></div>` : ''}</div>`;
+  }).join('');
+}
+
+function msgHTML(m, chat, isLast) {
+  const actions = (list) => `<div class="actions">${list}<span class="meta">${esc(metaLine(m))}</span></div>`;
+  const btn = (act, label, title) => `<button class="icon-btn" data-act="${act}" data-id="${m.id}" title="${title}">${label}</button>`;
+  if (m.note || m.auto) {
+    return `<div class="msg auto-tick" data-id="${m.id}"><div class="tick${m.note ? ' end' : ''}">${esc(m.note ? m.content : '🤖 ' + m.content.split('\n')[0].replace(/^\[Autopilot\]\s*/, ''))}</div></div>`;
+  }
+  if (m.role === 'user') {
+    return `<div class="msg user${isLast ? ' last' : ''}" data-id="${m.id}"><div class="bubble">${esc(m.content)}</div>
+      ${m.autoNote ? `<div class="tick">🤖 ${esc(m.autoNote.split('\n')[0].replace(/^\[Autopilot\]\s*/, ''))}</div>` : ''}
+      ${actions(btn('copy', '⧉', 'Copy') + btn('edit', '✎', 'Edit') + btn('delete', '🗑', 'Delete'))}</div>`;
+  }
+  if (m.role === 'tool' && m.name === 'web_search') {
+    const html = searchResultsHTML(m);
+    if (html) return html;
+  }
+  if (m.role === 'tool') {
+    return `<div class="msg tool" data-id="${m.id}"><div class="tool-card"><div class="head">↳ ${esc(m.name)} <span class="badge ${m.meta?.error ? 'err' : 'ok'}">${m.meta?.error ? 'error' : 'result'}</span><span class="meta">${m.meta?.ms ? m.meta.ms.toFixed(0) + 'ms' : ''}</span></div>${fileLinksHTML(m)}<pre>${esc(m.content)}</pre></div></div>`;
+  }
+  const reasoning = m.reasoning && S.look.showReasoning
+    ? `<details class="reasoning"><summary>💭 ${m.content || m.tool_calls?.length ? `Thought${m.meta?.thinkTime ? ` for ${m.meta.thinkTime.toFixed(1)}s` : ''}` : 'Thinking…'}</summary><div class="md r"></div></details>` : '';
+  return `<div class="msg assistant${isLast ? ' last' : ''}" data-id="${m.id}">
+    <div class="bubble">${reasoning}<div class="md c"></div><div class="tc">${toolCallCards(m, chat)}</div>
+    ${m.error ? `<div class="error-box">⚠ ${esc(m.error)}</div>` : ''}</div>
+    ${actions(btn('copy', '⧉', 'Copy') + btn('edit', '✎', 'Edit') + btn('regen', '↻', 'Regenerate') + btn('raw', '{ }', 'Raw request/response') + btn('delete', '🗑', 'Delete'))}</div>`;
+}
+
+function renderMessages() {
+  const chat = cur(); const inner = $('#messagesInner');
+  if (!chat || !chat.messages.length) {
+    inner.innerHTML = `<div class="empty"><h2>What should we test?</h2><div>${esc(S.model)} · ${S.endpoint === 'coding' ? 'Coding Plan' : 'Standard'} endpoint${S.thinking ? ' · thinking on' : ''}${S.tools.enabled ? ' · tools on' : ''}</div>
+      <div class="starters">${STARTERS.map((s, i) => `<div class="starter" data-starter="${i}"><b>${s.t}</b>${esc(s.d)}</div>`).join('')}</div></div>`;
+    return;
+  }
+  const atBottom = isNearBottom();
+  inner.innerHTML = chat.messages.map((m, i) => msgHTML(m, chat, i === chat.messages.length - 1)).join('');
+  chat.messages.forEach(m => {
+    if (m.role !== 'assistant') return;
+    const el = $(`.msg[data-id="${m.id}"]`);
+    const c = $('.md.c', el); renderMd(m.content, c);
+    const r = $('.md.r', el); if (r) renderMd(m.reasoning, r);
+    if (busy && m === chat.messages.at(-1)) { (m.content ? c : r || c).classList.add('cursor'); if (r && !m.content) r.parentElement.open = true; }
+  });
+  if (atBottom || busy) scrollBottom();
+}
+
+function renderStreaming(m) {
+  const el = $(`.msg[data-id="${m.id}"]`); if (!el) return;
+  const atBottom = isNearBottom();
+  if (m.reasoning && S.look.showReasoning && !$('details.reasoning', el)) {
+    $('.bubble', el).insertAdjacentHTML('afterbegin', `<details class="reasoning" open><summary>💭 Thinking…</summary><div class="md r"></div></details>`);
+  }
+  const r = $('.md.r', el), c = $('.md.c', el);
+  if (r) {
+    renderMd(m.reasoning, r); r.scrollTop = r.scrollHeight;
+    if (m.content) { $('summary', el).textContent = '💭 Thought'; r.classList.remove('cursor'); }
+    else r.classList.add('cursor');
+  }
+  renderMd(m.content, c); c.classList.toggle('cursor', !!m.content || !r);
+  $('.tc', el).innerHTML = toolCallCards(m, cur());
+  if (atBottom) scrollBottom();
+}
+
+const isNearBottom = () => { const b = $('#messages'); return b.scrollHeight - b.scrollTop - b.clientHeight < 120; };
+const scrollBottom = () => { const b = $('#messages'); b.scrollTop = b.scrollHeight; };
+
+function renderChatList() {
+  const q = $('#search').value.toLowerCase();
+  const list = chats.filter(c => !q || c.title.toLowerCase().includes(q) || c.messages.some(m => (m.content || '').toLowerCase().includes(q)));
+  $('#chatList').innerHTML = list.map(c => `<div class="chat-item${c.id === currentId ? ' active' : ''}" data-chat="${c.id}">
+    <span class="t">${esc(c.title)}</span>
+    <button class="icon-btn" data-dup="${c.id}" title="Duplicate">⧉</button>
+    <button class="icon-btn" data-del="${c.id}" title="Delete">✕</button></div>`).join('') || `<div class="meta" style="padding:10px">No chats</div>`;
+}
+
+function renderHeader() {
+  const chat = cur();
+  $('#chatTitle').textContent = chat?.title || 'New chat';
+  const sel = $('#modelQuick');
+  const all = [...new Set([S.model, ...models])];
+  sel.innerHTML = all.map(m => `<option ${m === S.model ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  $('#thinkChip').classList.toggle('on', S.thinking);
+  $('#toolsChip').classList.toggle('on', S.tools.enabled);
+  $('#searchChip').classList.toggle('on', S.tools.enabled && S.tools.builtins.web_search);
+  $('#hint').textContent = S.look.enterSends ? 'Enter to send · Shift+Enter for newline' : '⌘/Ctrl+Enter to send';
+}
+
+function renderAll() { renderChatList(); renderHeader(); renderMessages(); }
+
+function setBusy(b) {
+  busy = b;
+  refreshSendBtn();
+  if (!b) setStatus('');
+  else setStatus(S.thinking ? 'Thinking…' : 'Generating…');
+}
+const setStatus = t => { $('#statusLine').textContent = t; };
+
+function renderAttachments() {
+  $('#attachments').innerHTML = attachments.map((a, i) => `<span class="attachment">📄 ${esc(a.name)} <span class="meta">${(a.text.length / 1000).toFixed(1)}k</span><button class="icon-btn" data-rm="${i}" style="padding:0 2px">✕</button></span>`).join('');
+  updateEstimate();
+}
+
+function updateEstimate() {
+  const chars = $('#input').value.length + attachments.reduce((a, b) => a + b.text.length, 0);
+  $('#tokenEstimate').textContent = chars ? `~${Math.ceil(chars / 3.6)} tok` : '';
+}
+
+function autosize() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, innerHeight * .4) + 'px'; }
+
+const STARTERS = [
+  { t: '🧠 Reasoning', d: 'A bat and ball cost $1.10. The bat costs $1 more than the ball. Then design 3 harder trick questions like it and solve them.' },
+  { t: '💻 Coding', d: 'Write a complete single-file HTML/JS snake game with a score, speed-up, and pause key.' },
+  { t: '🌐 Web search', d: "What are the biggest tech news stories this week? Search the web, cite your sources with links." },
+  { t: '🕸️ Web agent', d: 'Crawl https://example.com (depth 1, save assets), fetch the raw response headers of https://github.com, render https://react.dev in headless Chrome with a screenshot, then write reports/web-test.md summarizing everything you saved.' },
+  { t: '🔧 Tool use', d: 'What time is it for me, what is (17^5 - sqrt(2)) / 3, and what does https://example.com say? Use your tools.' },
+  { t: '📐 Math', d: 'Prove that there are infinitely many primes, then derive the sum of the first n cubes. Use LaTeX.' },
+  { t: '🧾 Structured output', d: 'Return JSON describing 3 fictional startups: name, pitch, market_size_usd, risks[]. (Try JSON mode in Model settings.)' },
+  { t: '✍️ Long-form', d: 'Write a 1,000-word noir short story set on a floating city, with a twist ending.' },
+];
+
+/* =========================================================
+   Settings panel
+   ========================================================= */
+function field(label, inner, help = '', right = '') {
+  return `<div class="field"><div class="lbl"><span>${label}</span><span>${right}</span></div>${inner}${help ? `<div class="help">${help}</div>` : ''}</div>`;
+}
+function sw(key, label, sub = '') {
+  const v = key.split('.').reduce((o, k) => o[k], S);
+  return `<label class="switch-row"><span>${label}${sub ? `<small>${sub}</small>` : ''}</span><input type="checkbox" data-bind="${key}" ${v ? 'checked' : ''}></label>`;
+}
+function setPath(path, value) {
+  const ks = path.split('.'); let o = S;
+  for (const k of ks.slice(0, -1)) o = o[k];
+  o[ks.at(-1)] = value;
+}
+
+function renderPanel() {
+  const b = $('#panelBody');
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === activeTab));
+  if (activeTab === 'model') {
+    b.innerHTML = `
+      ${field('Endpoint', `<select data-bind="endpoint"><option value="coding" ${S.endpoint === 'coding' ? 'selected' : ''}>GLM Coding Plan (api/coding/paas/v4)</option><option value="standard" ${S.endpoint === 'standard' ? 'selected' : ''}>Standard pay-as-you-go (api/paas/v4)</option></select>`, 'Your key works on the Coding Plan endpoint. Standard needs account balance.')}
+      ${field('Model', `<select data-bind="model">${[...new Set([S.model, ...models])].map(m => `<option ${m === S.model ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>`, '<a href="#" id="refreshModels">Refresh model list</a>')}
+      ${field('Temperature', `<input type="range" min="0" max="1" step="0.01" data-bind="temperature" value="${S.temperature}">`, 'Randomness. Lower = focused, higher = creative.', S.temperature)}
+      ${field('Top P', `<input type="range" min="0.01" max="1" step="0.01" data-bind="top_p" value="${S.top_p}">`, 'Nucleus sampling cutoff.', S.top_p)}
+      ${field('Context budget', `<input type="range" min="50000" max="800000" step="10000" data-bind="contextChars" value="${S.contextChars}">`, 'When a conversation grows past this many characters, the oldest big tool results are trimmed in what gets sent (your chat keeps everything). Matters for long autopilot runs.', (+S.contextChars).toLocaleString() + ' chars')}
+      ${field('Max output tokens', `<input type="number" min="1" max="131072" data-bind="max_tokens" value="${S.max_tokens}">`, 'Includes reasoning tokens. Leave blank to use the model default.')}
+      <div class="section-title">Behavior</div>
+      ${sw('thinking', 'Deep thinking', 'Model reasons before answering (reasoning_content).')}
+      ${sw('stream', 'Stream responses', 'Token-by-token output with speed stats.')}
+      ${sw('jsonMode', 'JSON mode', 'response_format: json_object. Ask for JSON in your prompt.')}
+      <div style="height:14px"></div>
+      ${field('Stop sequences', `<input type="text" data-bind="stop" value="${esc(S.stop)}" placeholder="comma,separated">`)}
+      ${field('Extra request params (JSON)', `<textarea rows="5" data-bind="extra" spellcheck="false">${esc(S.extra)}</textarea>`, 'Merged into every request body; overrides anything above. E.g. {"do_sample": false, "request_id": "test"}.', '<span id="extraOk"></span>')}
+      <div class="section-title">Data</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn sm" id="exportSettings">Export settings</button>
+        <button class="btn sm" id="importSettings">Import settings</button>
+        <button class="btn sm danger" id="resetSettings">Reset settings</button>
+      </div>`;
+  } else if (activeTab === 'system') {
+    b.innerHTML = `
+      ${field('Presets', `<div class="preset-row">${S.presets.map((p, i) => `<button class="btn sm" data-preset="${i}" title="Right-click to delete">${esc(p.name)}</button>`).join('')}</div>`, 'Click to load · right-click to delete')}
+      ${field('System prompt', `<textarea class="prose" rows="14" data-bind="system" placeholder="(none)">${esc(S.system)}</textarea>`, 'Applied to every request, including existing chats.', `${S.system.length} chars`)}
+      <div style="display:flex;gap:6px"><button class="btn sm primary" id="savePreset">Save as preset</button><button class="btn sm" id="clearSystem">Clear</button></div>`;
+  } else if (activeTab === 'tools') {
+    b.innerHTML = `
+      ${sw('tools.enabled', 'Enable tool calling', 'Send tool definitions with each request.')}
+      ${sw('tools.autoRun', 'Auto-run tools', 'Execute calls and feed results back automatically.')}
+      ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
+      ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
+      ${['Web', 'Files', 'Memory', 'Compute'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
+        sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? 'Unavailable: Chrome not found on this Mac.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+      <div class="section-title">Ask before running</div>
+      ${sw('tools.confirm.deletes', 'Deleting files')}
+      ${sw('tools.confirm.writes', 'Writing files')}
+      ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
+      ${sw('tools.confirm.crawls', 'Crawling a site')}
+      ${sw('tools.confirm.js', 'Running JavaScript')}
+      <div class="section-title">Web access</div>
+      ${field('User-Agent', `<input type="text" data-bind="web.userAgent" value="${esc(S.web.userAgent)}" placeholder="Default: desktop Chrome">`, 'Sent with http_request, render_page and crawls. The model can also override it per request via headers.')}
+      ${field('Max characters per response', `<input type="range" min="5000" max="500000" step="5000" data-bind="web.maxChars" value="${S.web.maxChars}">`, 'How much of a page the model sees per call. It can page through the rest. Bigger uses more tokens.', S.web.maxChars.toLocaleString())}
+      ${field('Max download size (MB)', `<input type="number" min="1" max="2000" data-bind="web.maxDownloadMB" value="${S.web.maxDownloadMB}">`)}
+      ${field('Crawl delay between pages (ms)', `<input type="number" min="0" max="10000" step="50" data-bind="web.crawlDelayMs" value="${S.web.crawlDelayMs}">`, 'Be kind to servers.')}
+      ${sw('web.respectRobots', 'Respect robots.txt', 'Crawler skips paths the site disallows.')}
+      ${sw('web.allowPrivate', 'Allow local network', 'Let tools reach localhost, 192.168.x.x, etc. Off by default so web pages can\'t steer the model into your router or local services.')}
+      <div class="section-title">Web search</div>
+      ${field('Provider', `<select data-bind="search.provider">${searchProviders.map(p => `<option value="${p.id}" ${S.search.provider === p.id ? 'selected' : ''} ${p.available ? '' : 'disabled'}>${esc(p.label)}${p.available ? '' : ' (add key to .env)'}</option>`).join('')}</select>`, 'Z.ai search is included with your Coding Plan. Add TAVILY_API_KEY or BRAVE_API_KEY to .env to unlock the others.')}
+      ${field('Results per search', `<input type="range" min="1" max="20" step="1" data-bind="search.count" value="${S.search.count}">`, '', S.search.count)}
+      ${field('Default time range', `<select data-bind="search.recency">${[['noLimit', 'Any time'], ['oneDay', 'Past day'], ['oneWeek', 'Past week'], ['oneMonth', 'Past month'], ['oneYear', 'Past year']].map(([v, l]) => `<option value="${v}" ${S.search.recency === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`, 'Used when the model doesn\'t pick one itself.')}
+      ${field('Region (Z.ai)', `<select data-bind="search.location"><option value="us" ${S.search.location === 'us' ? 'selected' : ''}>Global / US</option><option value="cn" ${S.search.location === 'cn' ? 'selected' : ''}>China</option></select>`)}
+      ${field('Snippet size (Z.ai)', `<select data-bind="search.contentSize"><option value="medium" ${S.search.contentSize === 'medium' ? 'selected' : ''}>Medium (~500 words)</option><option value="high" ${S.search.contentSize === 'high' ? 'selected' : ''}>High (~2,500 words, uses more tokens)</option></select>`)}
+      ${sw('look.expandSearch', 'Expand search results', 'Show result lists open in the chat.')}
+      <div class="section-title">Custom tools</div>
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-bottom:10px">Define any function. The handler is JavaScript run in your browser with <code>args</code>; its return value goes back to the model.</div>
+      ${S.tools.custom.map((t, i) => `
+        <div class="tool-def" data-tool="${i}">
+          <div class="row"><input type="checkbox" data-tf="enabled" ${t.enabled ? 'checked' : ''}><input type="text" data-tf="name" value="${esc(t.name)}" placeholder="function_name"><button class="icon-btn" data-tdel="${i}" title="Delete">✕</button></div>
+          <input type="text" data-tf="description" value="${esc(t.description)}" placeholder="What it does (the model reads this)">
+          <textarea rows="6" data-tf="parameters" spellcheck="false" placeholder="JSON Schema">${esc(t.parameters)}</textarea>
+          <textarea rows="6" data-tf="handler" spellcheck="false" placeholder="return { ... }">${esc(t.handler)}</textarea>
+        </div>`).join('')}
+      <button class="btn sm" id="addTool">+ Add custom tool</button>
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-top:14px">Note: image input isn't supported by GLM 5.3. <code>web_search</code> finds pages; <code>fetch_url</code> reads them in full.</div>`;
+  } else if (activeTab === 'memory') {
+    b.innerHTML = `
+      ${sw('memory.enabled', 'Long-term memory', 'Show GLM its saved memories in every chat.')}
+      ${sw('memory.keepReasoning', 'Remember its thinking', 'Send GLM its earlier reasoning each turn so it stays consistent. Uses more tokens.')}
+      <div style="height:12px"></div>
+      ${field('Memory shown per request', `<input type="range" min="2000" max="40000" step="1000" data-bind="memory.maxPromptChars" value="${S.memory.maxPromptChars}">`, 'Newest memories win when there are more than fit.', S.memory.maxPromptChars.toLocaleString() + ' chars')}
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-bottom:12px">GLM saves memories itself with the <code>remember</code> tool and can search all your past chats. It always remembers everything inside a chat.</div>
+      ${field('Add a memory', `<textarea class="prose" rows="2" id="memNew" placeholder="e.g. I prefer short answers with code examples"></textarea>`, '', '')}
+      <button class="btn sm primary" id="memAdd">Save memory</button>
+      <div class="section-title">Memories (${memoryCache.length})</div>
+      ${memoryCache.length ? [...memoryCache].reverse().map(m => `
+        <div class="file-row" style="align-items:flex-start">
+          <span class="fname" style="white-space:normal" data-medit="${m.id}" title="Click to edit">${esc(m.text)}
+            <span class="meta" style="display:block;margin:2px 0 0">${(m.updated || m.created).slice(0, 10)} · ${m.source === 'user' ? 'you' : 'GLM'} · ${m.id}</span></span>
+          <button class="icon-btn" data-mdel="${m.id}" title="Forget">🗑</button>
+        </div>`).join('') : '<div class="meta">Nothing yet.</div>'}
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <button class="btn sm" id="memExport">Export</button>
+        <button class="btn sm danger" id="memClear">Clear all</button>
+      </div>`;
+  } else if (activeTab === 'files') {
+    b.innerHTML = `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn sm" id="filesRefresh">↻ Refresh</button>
+        <button class="btn sm" id="filesUpload">⤒ Upload</button>
+        <a class="btn sm" href="${zipUrl('')}" style="text-decoration:none">⤓ Download all</a>
+        <input type="file" id="sandboxUpload" multiple hidden>
+      </div>
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-bottom:10px">Everything GLM downloads, crawls, screenshots or writes lands here. Uploads go to <code>uploads/</code> so GLM can read them.</div>
+      <div id="fileTree" class="meta">Loading…</div>
+      <div class="section-title">Cookie sessions</div>
+      <div id="sessionsBox" class="meta">…</div>`;
+    loadFileTree();
+  } else if (activeTab === 'look') {
+    const accents = ['#6d5dfc', '#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#111827'];
+    b.innerHTML = `
+      ${field('Theme', `<select data-bind="look.theme"><option value="system" ${S.look.theme === 'system' ? 'selected' : ''}>System</option><option value="light" ${S.look.theme === 'light' ? 'selected' : ''}>Light</option><option value="dark" ${S.look.theme === 'dark' ? 'selected' : ''}>Dark</option></select>`)}
+      ${field('Accent color', `<div class="color-row">${accents.map(c => `<span class="swatch${S.look.accent === c ? ' active' : ''}" data-accent="${c}" style="background:${c}"></span>`).join('')}<input type="color" data-bind="look.accent" value="${S.look.accent}"></div>`)}
+      ${field('Font', `<select data-bind="look.font"><option value="inter" ${S.look.font === 'inter' ? 'selected' : ''}>Inter (sans)</option><option value="system" ${S.look.font === 'system' ? 'selected' : ''}>System UI</option><option value="serif" ${S.look.font === 'serif' ? 'selected' : ''}>Source Serif</option><option value="mono" ${S.look.font === 'mono' ? 'selected' : ''}>JetBrains Mono</option></select>`)}
+      ${field('Font size', `<input type="range" min="12" max="20" step="1" data-bind="look.fontSize" value="${S.look.fontSize}">`, '', S.look.fontSize + 'px')}
+      ${field('Chat width', `<input type="range" min="560" max="1400" step="20" data-bind="look.width" value="${S.look.width}">`, '', S.look.width + 'px')}
+      ${field('Corner radius', `<input type="range" min="0" max="24" step="1" data-bind="look.radius" value="${S.look.radius}">`, '', S.look.radius + 'px')}
+      ${sw('look.bubbles', 'Assistant bubbles', 'Card around assistant replies.')}
+      ${sw('look.showReasoning', 'Show reasoning', 'Display the model\'s thinking.')}
+      ${sw('look.showMeta', 'Show stats', 'Tokens, speed, latency under messages.')}
+      ${sw('look.enterSends', 'Enter sends', 'Off = ⌘/Ctrl+Enter to send.')}
+      <div style="height:14px"></div>
+      ${field('Custom CSS', `<textarea rows="8" data-bind="look.customCss" spellcheck="false" placeholder=".msg.user .bubble { background: hotpink; }">${esc(S.look.customCss)}</textarea>`, 'Anything goes. Variables: --accent, --bg, --panel, --text, --radius, --font…')}`;
+  }
+}
+
+function applyLook() {
+  const L = S.look, r = document.documentElement;
+  if (L.theme === 'system') r.removeAttribute('data-theme'); else r.dataset.theme = L.theme;
+  r.style.setProperty('--accent', L.accent);
+  r.style.setProperty('--font-size', L.fontSize + 'px');
+  r.style.setProperty('--chat-width', L.width + 'px');
+  r.style.setProperty('--radius', L.radius + 'px');
+  r.style.setProperty('--font', { inter: "'Inter', system-ui, sans-serif", system: 'system-ui, -apple-system, sans-serif', serif: "'Source Serif 4', Georgia, serif", mono: "'JetBrains Mono', monospace" }[L.font]);
+  document.body.classList.toggle('bubbles', L.bubbles);
+  $('#custom-css').textContent = L.customCss;
+}
+
+async function loadFileTree() {
+  const box = $('#fileTree'); if (!box) return;
+  const [r, c] = await Promise.all([callServerTool('list_files', {}), callServerTool('capabilities', {})]).catch(() => [{ error: 'Server unreachable' }, caps]);
+  caps = c;
+  if (r.error) { box.textContent = r.error; return; }
+  box.classList.remove('meta');
+  box.innerHTML = r.files.length ? `<div class="meta" style="margin-bottom:6px">${r.count} items · ${fmtBytes(r.total_bytes)}</div>` + r.files.map(f => {
+    const depth = f.path.split('/').length - 1, name = f.path.split('/').pop();
+    const actions = f.type === 'dir'
+      ? `<a class="icon-btn" href="${zipUrl(f.path)}" title="Download folder as .zip">⤓</a>`
+      : `<a class="icon-btn" href="${fileUrl(f.path)}?download" title="Download">⤓</a>`;
+    return `<div class="file-row" style="padding-left:${6 + depth * 14}px">
+      <span class="fname">${f.type === 'dir' ? '📁 ' + esc(name) : `<a href="${fileUrl(f.path)}" target="_blank">📄 ${esc(name)}</a>`}</span>
+      <span class="meta">${fmtBytes(f.size)}</span>${actions}<button class="icon-btn" data-fdel="${esc(f.path)}" title="Delete">🗑</button></div>`;
+  }).join('') : '<div class="meta">Empty. Ask GLM to download, crawl or write something.</div>';
+  const sb = $('#sessionsBox');
+  if (sb) sb.innerHTML = caps.sessions?.length ? caps.sessions.map(esc).join(', ') + ' <button class="btn sm" id="clearSessions" style="margin-left:6px">Clear all</button>' : 'None yet. GLM creates one when it passes <code>session</code> to http_request.';
+}
+
+async function loadModels() {
+  try {
+    const r = await fetch('/api/models', { headers: { 'X-Endpoint': S.endpoint } });
+    const j = await r.json();
+    if (j.data?.length) { models = j.data.map(m => m.id).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })); renderHeader(); if (activeTab === 'model') renderPanel(); }
+  } catch {}
+}
+
+/* =========================================================
+   Events
+   ========================================================= */
+$('#panelBody').addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.bind) {
+    let v = t.type === 'checkbox' ? t.checked : t.type === 'range' || t.type === 'number' ? (t.value === '' ? '' : +t.value) : t.value;
+    setPath(t.dataset.bind, v);
+    if (t.dataset.bind === 'extra') { let ok = true; try { JSON.parse(v || '{}'); } catch { ok = false; } $('#extraOk').innerHTML = ok ? '<span style="color:var(--ok)">valid</span>' : '<span style="color:var(--danger)">invalid JSON</span>'; }
+    if (t.type === 'range') { const lab = t.closest('.field')?.querySelector('.lbl span:last-child'); if (lab) lab.textContent = v + (t.dataset.bind.startsWith('look.') ? 'px' : ''); }
+    if (t.dataset.bind === 'system') t.closest('.field').querySelector('.lbl span:last-child').textContent = v.length + ' chars';
+    saveSettings(); applyLook(); renderHeader();
+    if (t.type === 'checkbox' && t.dataset.bind.startsWith('look.')) renderMessages();
+    if (t.dataset.bind === 'endpoint') loadModels();
+    if (['thinking', 'tools.enabled'].includes(t.dataset.bind) && !cur()?.messages.length) renderMessages();
+  }
+  const tf = t.dataset.tf;
+  if (tf) {
+    const i = +t.closest('[data-tool]').dataset.tool;
+    S.tools.custom[i][tf] = t.type === 'checkbox' ? t.checked : t.value;
+    if (tf === 'parameters') { try { JSON.parse(t.value); t.style.borderColor = ''; } catch { t.style.borderColor = 'var(--danger)'; } }
+    saveSettings();
+  }
+});
+$('#panelBody').addEventListener('click', e => {
+  const t = e.target;
+  if (t.dataset.accent) { S.look.accent = t.dataset.accent; saveSettings(); applyLook(); renderPanel(); }
+  if (t.dataset.preset) { S.system = S.presets[+t.dataset.preset].text; saveSettings(); renderPanel(); toast(`Loaded "${S.presets[+t.dataset.preset].name}"`); }
+  if (t.dataset.tdel) { S.tools.custom.splice(+t.dataset.tdel, 1); saveSettings(); renderPanel(); }
+  if (t.id === 'memAdd') {
+    const text = $('#memNew').value.trim();
+    if (text) callServerTool('remember', { text, source: 'user' }).then(r => { if (r.error) toast(r.error); refreshMemory(); });
+  }
+  const medit = t.closest('[data-medit]')?.dataset.medit;
+  if (medit) {
+    const m = memoryCache.find(x => x.id === medit);
+    const text = m && prompt('Edit memory', m.text);
+    if (text && text.trim() !== m.text) callServerTool('update_memory', { id: medit, text }).then(refreshMemory);
+  }
+  if (t.dataset.mdel) callServerTool('forget', { id: t.dataset.mdel }).then(refreshMemory);
+  if (t.id === 'memExport') download('glm-memory.json', JSON.stringify(memoryCache, null, 2));
+  if (t.id === 'memClear' && confirm('Delete all memories? This cannot be undone.')) callServerTool('memory_clear', {}).then(refreshMemory);
+  if (t.id === 'filesRefresh') loadFileTree();
+  if (t.id === 'filesUpload') $('#sandboxUpload').click();
+  if (t.id === 'clearSessions') callServerTool('clear_sessions', {}).then(loadFileTree);
+  const fdel = t.closest('[data-fdel]')?.dataset.fdel;
+  if (fdel && confirm(`Delete ${fdel}?`)) callServerTool('delete_file', { path: fdel }).then(loadFileTree);
+  if (t.id === 'addTool') { S.tools.custom.push({ id: uid(), enabled: true, name: 'my_tool', description: '', parameters: JSON.stringify({ type: 'object', properties: { input: { type: 'string' } }, required: ['input'] }, null, 2), handler: 'return { echo: args.input };' }); saveSettings(); renderPanel(); }
+  if (t.id === 'savePreset') { const n = prompt('Preset name?'); if (n) { S.presets.push({ name: n, text: S.system }); saveSettings(); renderPanel(); } }
+  if (t.id === 'clearSystem') { S.system = ''; saveSettings(); renderPanel(); }
+  if (t.id === 'refreshModels') { e.preventDefault(); loadModels().then(() => toast('Models refreshed')); }
+  if (t.id === 'exportSettings') download('glm-settings.json', JSON.stringify(S, null, 2));
+  if (t.id === 'importSettings') { const f = $('#importFile'); f.dataset.mode = 'settings'; f.click(); }
+  if (t.id === 'resetSettings' && confirm('Reset all settings to defaults? (Chats are kept.)')) { S = structuredClone(DEFAULTS); saveSettings(); applyLook(); renderAll(); renderPanel(); }
+});
+$('#panelBody').addEventListener('contextmenu', e => {
+  const p = e.target.dataset.preset; if (p == null) return;
+  e.preventDefault();
+  if (confirm(`Delete preset "${S.presets[+p].name}"?`)) { S.presets.splice(+p, 1); saveSettings(); renderPanel(); }
+});
+$('#panelBody').addEventListener('change', async e => {
+  if (e.target.id !== 'sandboxUpload') return;
+  for (const f of e.target.files) {
+    const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(f); });
+    const out = await callServerTool('write_file', { path: 'uploads/' + f.name, content: b64, encoding: 'base64' });
+    toast(out.error ? `Upload failed: ${out.error}` : `Uploaded to ${out.path}`);
+  }
+  loadFileTree();
+});
+$$('.tab').forEach(t => t.onclick = () => { activeTab = t.dataset.tab; renderPanel(); });
+
+$('#messagesInner').addEventListener('click', e => {
+  const st = e.target.closest('[data-starter]');
+  if (st) { $('#input').value = STARTERS[+st.dataset.starter].d; autosize(); updateEstimate(); $('#input').focus(); return; }
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const id = b.dataset.id, m = cur()?.messages.find(x => x.id === id);
+  switch (b.dataset.act) {
+    case 'copy': navigator.clipboard.writeText(m.content || ''); toast('Copied'); break;
+    case 'edit': editMsg(id); break;
+    case 'regen': regenerate(id); break;
+    case 'delete': deleteMsg(id); break;
+    case 'raw': showRaw(id); break;
+    case 'runtools': continueToolsManually(id); break;
+  }
+});
+
+$('#chatList').addEventListener('click', e => {
+  const del = e.target.dataset.del, dup = e.target.dataset.dup;
+  if (del) {
+    e.stopPropagation();
+    if (!confirm('Delete this chat?')) return;
+    chats = chats.filter(c => c.id !== del);
+    if (currentId === del) currentId = chats[0]?.id || null;
+    saveChats(); renderAll(); return;
+  }
+  if (dup) {
+    e.stopPropagation();
+    const src = chats.find(c => c.id === dup);
+    const c = { ...structuredClone(src), id: uid(), title: src.title + ' (copy)', created: Date.now() };
+    c.messages.forEach(m => m.id = uid());
+    chats.unshift(c); currentId = c.id; saveChats(); renderAll(); return;
+  }
+  const item = e.target.closest('[data-chat]');
+  if (item && !busy) { currentId = item.dataset.chat; saveChats(); renderAll(); if (innerWidth < 900) $('#app').classList.add('no-sidebar'); }
+});
+
+$('#chatTitle').onclick = () => {
+  const c = cur(); if (!c) return;
+  const n = prompt('Rename chat', c.title);
+  if (n) { c.title = n; saveChats(); renderAll(); }
+};
+$('#search').oninput = renderChatList;
+$('#newChat').onclick = () => { if (!busy) newChat(); };
+$('#toggleSidebar').onclick = () => $('#app').classList.toggle('no-sidebar');
+$('#togglePanel').onclick = () => { $('#panel').classList.toggle('hidden'); renderPanel(); };
+$('#modelQuick').onchange = e => { S.model = e.target.value; saveSettings(); if (activeTab === 'model') renderPanel(); if (!cur()?.messages.length) renderMessages(); };
+$('#thinkChip').onclick = () => { S.thinking = !S.thinking; saveSettings(); renderHeader(); renderPanel(); if (!cur()?.messages.length) renderMessages(); };
+$('#searchChip').onclick = () => {
+  const on = !(S.tools.enabled && S.tools.builtins.web_search);
+  S.tools.builtins.web_search = on;
+  if (on) S.tools.enabled = true;
+  saveSettings(); renderHeader(); renderPanel(); if (!cur()?.messages.length) renderMessages();
+};
+$('#autoChip').onclick = openAutopilotDialog;
+$('#autoStop').onclick = stopAutopilot;
+$('#autoPause').onclick = () => { AUTO.paused = !AUTO.paused; updateAutoBar(); };
+$('#toolsChip').onclick = () => { S.tools.enabled = !S.tools.enabled; saveSettings(); renderHeader(); renderPanel(); if (!cur()?.messages.length) renderMessages(); };
+$('#exportChat').onclick = () => { const c = cur(); if (c) download(c.title.replace(/[^\w\- ]/g, '').slice(0, 40) + '.md', chatToMarkdown(c), 'text/markdown'); };
+$('#exportAllBtn').onclick = () => download('glm-chats.json', JSON.stringify(chats, null, 2));
+$('#importBtn').onclick = () => { const f = $('#importFile'); f.dataset.mode = 'chats'; f.click(); };
+$('#importFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (e.target.dataset.mode === 'settings') { S = deepMerge(structuredClone(DEFAULTS), data); saveSettings(); applyLook(); renderAll(); renderPanel(); toast('Settings imported'); }
+    else {
+      const arr = Array.isArray(data) ? data : [data];
+      const ids = new Set(chats.map(c => c.id));
+      chats = [...arr.filter(c => c.id && c.messages && !ids.has(c.id)), ...chats];
+      saveChats(); renderAll(); toast(`Imported ${arr.length} chat(s)`);
+    }
+  } catch (err) { toast('Import failed: ' + err.message); }
+  e.target.value = '';
+};
+
+// While GLM is working the button is Stop, except in autopilot when you've typed something: then it queues it.
+$('#sendBtn').onclick = () => (busy && !(AUTO.running && $('#input').value.trim())) ? abortCtl?.abort() : send();
+function refreshSendBtn() {
+  const queue = AUTO.running && $('#input').value.trim();
+  const stop = busy && !queue;
+  const s = $('#sendBtn');
+  s.classList.toggle('stop', stop); s.innerHTML = stop ? '■' : '➤';
+  s.title = stop ? 'Stop this step' : queue ? 'Send to GLM (read at its next step)' : 'Send';
+}
+$('#input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.isComposing) return;
+  const mod = e.metaKey || e.ctrlKey;
+  if ((S.look.enterSends && !e.shiftKey) || (!S.look.enterSends && mod)) { e.preventDefault(); send(); }
+});
+$('#input').addEventListener('input', () => { autosize(); updateEstimate(); refreshSendBtn(); });
+$('#attachBtn').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = async e => {
+  for (const f of e.target.files) {
+    if (f.size > 2e6) { toast(`${f.name} is too big (2MB max)`); continue; }
+    const text = await f.text();
+    if (/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 2000))) { toast(`${f.name} looks binary — GLM 5.3 is text-only`); continue; }
+    attachments.push({ name: f.name, ext: f.name.split('.').pop(), text });
+  }
+  e.target.value = ''; renderAttachments();
+};
+$('#attachments').onclick = e => { if (e.target.dataset.rm != null) { attachments.splice(+e.target.dataset.rm, 1); renderAttachments(); } };
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!busy) newChat(); }
+  if (e.key === 'Escape') { $('.modal-bg')?.remove(); if (busy) abortCtl?.abort(); }
+});
+// paste text files / large text
+$('#input').addEventListener('paste', async e => {
+  const files = [...e.clipboardData.files];
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) {
+    if (f.type.startsWith('image/')) { toast('GLM 5.3 is text-only — images aren\'t supported'); continue; }
+    attachments.push({ name: f.name, ext: f.name.split('.').pop(), text: await f.text() });
+  }
+  renderAttachments();
+});
+
+/* =========================================================
+   Boot
+   ========================================================= */
+(async () => {
+  // one-time settings migration: add the Web agent preset for existing users
+  if ((S.version || 1) < 2) {
+    if (!S.presets.some(p => p.name === WEB_AGENT_PRESET.name)) S.presets.push(WEB_AGENT_PRESET);
+    S.version = 2; saveSettings();
+  }
+  try {
+    const serverChats = await (await fetch('/api/chats')).json();
+    let onServer = true;
+    if (Array.isArray(serverChats)) chats = serverChats;
+    else if (chats.length) onServer = await flushChats(); // first run: move browser-stored chats to the server
+    if (onServer) try { localStorage.removeItem('glm.chats'); } catch {}
+  } catch { toast('Server unreachable — chats won\'t be saved'); }
+  if (!cur()) { if (chats.length) currentId = chats[0].id; else newChat(); }
+  if (innerWidth < 900) { $('#app').classList.add('no-sidebar'); $('#panel').classList.add('hidden'); }
+  applyLook(); renderAll(); renderPanel(); loadModels();
+  fetch('/api/search/providers').then(r => r.json()).then(p => { searchProviders = p; if (activeTab === 'tools') renderPanel(); }).catch(() => {});
+  callServerTool('capabilities', {}).then(c => { caps = c; if (activeTab === 'tools') renderPanel(); }).catch(() => {});
+  refreshMemory();
+  $('#input').focus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# secrets
+.env
+# your chats, memories and everything GLM downloads or writes
+data/
+files/
+# local tooling
+.claude/
+node_modules/
+.DS_Store
