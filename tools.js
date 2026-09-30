@@ -433,7 +433,7 @@ async function clear_sessions(o = {}) {
 }
 
 async function capabilities() {
-  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
+  return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()] };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -570,6 +570,93 @@ async function video_status(o = {}) {
   return waitVideo(o.video_id, o.wait_ms ?? 60000);
 }
 
+/* ---------------- ears: transcription + audio understanding (OpenAI) ----------------
+   The browser decodes any audio/video file into mono WAV chunks under audio/.cache/;
+   these tools send them to OpenAI, then delete the chunks. */
+const AUDIO_CACHE = 'audio/.cache/';
+
+function requireOpenAI() {
+  if (!process.env.OPENAI_API_KEY) throw new Error('Audio is not set up: add OPENAI_API_KEY to .env and restart the server.');
+}
+async function readCacheChunk(rel) {
+  if (!String(rel).startsWith(AUDIO_CACHE)) throw new Error('Audio chunks must come from audio/.cache/');
+  return fsp.readFile(safePath(rel));
+}
+const dropCache = rels => Promise.all(rels.map(r => fsp.rm(safePath(r), { force: true }).catch(() => {})));
+const clock = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+
+async function transcribe_chunks(o) {
+  requireOpenAI();
+  const chunks = Array.isArray(o.chunks) ? o.chunks : [];
+  if (!chunks.length) throw new Error('No audio to transcribe');
+  const model = o.model || 'gpt-4o-transcribe-diarize';
+  const diarize = /diarize/.test(model) && o.speakers !== false;
+  const segments = []; const texts = [];
+  try {
+    for (const [i, c] of chunks.entries()) {
+      const form = new FormData();
+      form.append('file', new Blob([await readCacheChunk(c.path)], { type: 'audio/wav' }), `chunk-${i}.wav`);
+      form.append('model', model);
+      form.append('response_format', diarize ? 'diarized_json' : model === 'whisper-1' ? 'verbose_json' : 'json');
+      if (diarize) form.append('chunking_strategy', 'auto');
+      if (o.language) form.append('language', o.language);
+      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form, signal: AbortSignal.timeout(600000),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`OpenAI: ${j.error?.message || 'HTTP ' + r.status}`);
+      const off = Number(c.offset_s) || 0;
+      if (Array.isArray(j.segments) && j.segments.length) {
+        for (const sg of j.segments) segments.push({ start: +(off + (sg.start || 0)).toFixed(1), end: +(off + (sg.end || 0)).toFixed(1), ...(sg.speaker ? { speaker: chunks.length > 1 ? `${i + 1}${sg.speaker}` : sg.speaker } : {}), text: String(sg.text || '').trim() });
+      }
+      texts.push(String(j.text || (j.segments || []).map(sg => sg.text).join(' ')).trim());
+    }
+  } finally { await dropCache(chunks.map(c => c.path)); }
+
+  const text = texts.join('\n\n').trim();
+  const source = String(o.source || 'audio');
+  const lines = segments.length
+    ? segments.map(sg => `[${clock(sg.start)}]${sg.speaker ? ` **${sg.speaker}:**` : ''} ${sg.text}`)
+    : [text];
+  const md = `# Transcript: ${path.basename(source)}\n\n_Source: ${source} · model: ${model} · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}_\n\n${lines.join('\n\n')}\n`;
+  const base = path.basename(source).replace(/\.[^.]+$/, '') || 'audio';
+  const saved = await saveBytes(o.save_to || `audio/transcripts/${base}.md`, Buffer.from(md));
+  const readable = segments.length ? lines.join('\n') : text;
+  return {
+    source, model, saved_to: saved, duration_s: o.duration_s, chunks: chunks.length,
+    ...(diarize && chunks.length > 1 ? { note: 'Speaker labels restart in each 10-minute chunk (1A, 2A…), so the same person can have different labels across chunks.' } : {}),
+    ...(segments.length ? { speakers: [...new Set(segments.map(sg => sg.speaker).filter(Boolean))] } : {}),
+    transcript: readable.length > 60000 ? readable.slice(0, 60000) + `\n…[truncated; full transcript in ${saved}]` : readable,
+  };
+}
+
+async function listen_audio(o) {
+  requireOpenAI();
+  const chunk = o.chunk;
+  if (!chunk?.path) throw new Error('No audio to listen to');
+  try {
+    const data = (await readCacheChunk(chunk.path)).toString('base64');
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: o.model || 'gpt-audio-1.5', modalities: ['text'],
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: `Listen carefully to this audio and answer the question. Describe what you actually hear (speech, voices and tone, music, sound effects, background, quality) and say when you're unsure.\n\nQuestion: ${o.question || 'Describe everything you hear in detail.'}` },
+          { type: 'input_audio', input_audio: { data, format: 'wav' } },
+        ] }],
+      }),
+      signal: AbortSignal.timeout(300000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`OpenAI: ${j.error?.message || 'HTTP ' + r.status}`);
+    let answer = (j.choices?.[0]?.message?.content || '').trim();
+    // the model sometimes wraps its answer as {"analysis": "..."}; unwrap single-field JSON
+    try { const parsed = JSON.parse(answer); const vals = Object.values(parsed || {}); if (vals.length === 1 && typeof vals[0] === 'string') answer = vals[0]; } catch {}
+    return { source: o.source, model: o.model || 'gpt-audio-1.5', heard: `${clock(chunk.offset_s || 0)}–${clock((chunk.offset_s || 0) + (chunk.duration_s || 0))}`, answer };
+  } finally { await dropCache([chunk.path]); }
+}
+
 /* ---------------- long-term memory + past chats ---------------- */
 const DATA_DIR = path.join(__dirname, 'data');
 const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
@@ -684,7 +771,7 @@ async function read_chat(o) {
 const TOOLS = {
   http_request, render_page, crawl_site, list_files, read_file, write_file, delete_file, clear_sessions, capabilities,
   memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
-  generate_video, video_status,
+  generate_video, video_status, transcribe_chunks, listen_audio,
 };
 
 /* ---------------- HTTP glue ---------------- */

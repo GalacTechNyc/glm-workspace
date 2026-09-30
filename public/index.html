@@ -334,15 +334,16 @@ const DEFAULTS = {
       web_search: true, fetch_url: true, http_request: true, render_page: true, crawl_site: true,
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
-      look_at_image: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
+      look_at_image: true, transcribe_audio: true, listen_to_audio: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
   contextChars: 400000,
   vision: { model: 'glm-4.6v', fallback: 'glm-4.5v', maxDim: 2048 },
   images: { model: 'gpt-image-2', size: 'auto', quality: 'auto' },
+  audio: { transcribeModel: 'gpt-4o-transcribe-diarize', listenModel: 'gpt-audio-1.5' },
   videos: { model: 'bytedance/seedance-2.5/text-to-video', duration: 5, resolution: '720p', ratio: 'adaptive', audio: true },
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
@@ -793,6 +794,98 @@ Object.assign(BUILTINS, {
   },
 });
 
+/* ---------- ears: decode any audio/video in the browser, then transcribe or listen via OpenAI ---------- */
+const hms = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, x = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+
+async function decodeAudioFile(path, sampleRate) {
+  const res = await fetch(fileUrl(String(path || '').replace(/^\/+/, '')));
+  if (!res.ok) throw new Error(`Couldn't open ${path}. Check the path with list_files.`);
+  const ctx = new OfflineAudioContext(1, 1, sampleRate); // decoding here resamples to sampleRate
+  let buf;
+  try { buf = await ctx.decodeAudioData(await res.arrayBuffer()); }
+  catch { throw new Error(`${path}: no audio track the browser can decode`); }
+  if (buf.duration > 7200) throw new Error(`${path} is ${hms(buf.duration)} long; 2 hours is the max`);
+  const mono = new Float32Array(buf.length);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels;
+  }
+  return { samples: mono, rate: buf.sampleRate, duration: buf.duration };
+}
+
+function wavBase64(samples, rate) {
+  const bytes = new Uint8Array(44 + samples.length * 2), v = new DataView(bytes.buffer);
+  const tag = (o, t) => { for (let i = 0; i < 4; i++) bytes[o + i] = t.charCodeAt(i); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); tag(8, 'WAVE'); tag(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); tag(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) { const x = Math.max(-1, Math.min(1, samples[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  let str = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) str += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(str);
+}
+
+async function stageAudio(samples, rate, fromS, toS, tag) {
+  const a = Math.floor(fromS * rate), b = Math.floor(toS * rate);
+  const w = await callServerTool('write_file', { path: `audio/.cache/${tag}.wav`, content: wavBase64(samples.subarray(a, b), rate), encoding: 'base64' });
+  if (w.error) throw new Error(w.error);
+  return { path: w.path, offset_s: +fromS.toFixed(2), duration_s: +((b - a) / rate).toFixed(2) };
+}
+
+const LISTEN_MAX_S = 240;
+Object.assign(BUILTINS, {
+  transcribe_audio: {
+    group: 'Media', server: true, needs: 'audio',
+    def: {
+      name: 'transcribe_audio',
+      description: "Hear what is SAID in an audio or video file from the files sandbox (uploads, downloads, generated videos): returns a timestamped transcript with speaker labels, and saves it as a Markdown file. Works on any common format (mp3, wav, m4a, ogg, flac, webm, mp4, mov…), up to 2 hours; long audio is split into 10-minute chunks automatically. For tone, emotion, music, or non-speech sounds, use listen_to_audio.",
+      parameters: { type: 'object', properties: {
+        path: { type: 'string', description: 'Audio or video path in the files sandbox.' },
+        speakers: { type: 'boolean', description: 'Label who is speaking (default true).' },
+        language: { type: 'string', description: 'Optional ISO language code like "en" or "es" to improve accuracy.' },
+        start_s: { type: 'number', description: 'Only transcribe from this second.' },
+        end_s: { type: 'number', description: 'Only transcribe up to this second.' },
+      }, required: ['path'] },
+    },
+    run: async ({ path, speakers = true, language, start_s, end_s }) => {
+      try {
+        const { samples, rate, duration } = await decodeAudioFile(path, 16000);
+        const from = Math.min(Math.max(+start_s || 0, 0), duration), to = Math.min(Math.max(+(end_s ?? duration), from), duration);
+        if (to - from < 0.2) return { error: 'That range has no audio' };
+        const id = uid(), chunks = [];
+        for (let t = from, i = 0; t < to - 0.2; t += 600, i++) chunks.push(await stageAudio(samples, rate, t, Math.min(to, t + 600), `${id}-${i}`));
+        return await callServerTool('transcribe_chunks', { chunks, model: S.audio.transcribeModel, speakers, language, source: path, duration_s: +(to - from).toFixed(1) });
+      } catch (e) { return { error: e.message }; }
+    },
+  },
+  listen_to_audio: {
+    group: 'Media', server: true, needs: 'audio',
+    def: {
+      name: 'listen_to_audio',
+      description: `Actually listen to audio (or a video's soundtrack) from the files sandbox and ask a question about it: tone of voice and emotion, music (genre, mood, tempo, instruments), sound effects, background noise, audio quality, whether a sound is present, what's happening. Hears up to ${LISTEN_MAX_S / 60} minutes per call; use start_s/end_s for other parts of longer files. For exact words, use transcribe_audio.`,
+      parameters: { type: 'object', properties: {
+        path: { type: 'string', description: 'Audio or video path in the files sandbox.' },
+        question: { type: 'string', description: 'What you want to know. Default: describe everything heard.' },
+        start_s: { type: 'number' },
+        end_s: { type: 'number' },
+      }, required: ['path'] },
+    },
+    run: async ({ path, question, start_s, end_s }) => {
+      try {
+        const { samples, rate, duration } = await decodeAudioFile(path, 24000);
+        const from = Math.min(Math.max(+start_s || 0, 0), duration);
+        let to = Math.min(Math.max(+(end_s ?? duration), from), duration);
+        const clipped = to - from > LISTEN_MAX_S;
+        if (clipped) to = from + LISTEN_MAX_S;
+        if (to - from < 0.2) return { error: 'That range has no audio' };
+        const chunk = await stageAudio(samples, rate, from, to, uid());
+        const r = await callServerTool('listen_audio', { chunk, question, model: S.audio.listenModel, source: path });
+        return { ...r, total_duration_s: +duration.toFixed(1), ...(clipped ? { note: `Heard ${hms(from)}–${hms(to)} only (${LISTEN_MAX_S / 60}-minute max per listen). Call again with start_s/end_s for the rest.` } : {}) };
+      } catch (e) { return { error: e.message }; }
+    },
+  },
+});
+
 let memoryCache = [];
 async function refreshMemory() {
   try { const r = await callServerTool('memory_list', {}); if (Array.isArray(r.memories)) memoryCache = r.memories; } catch {}
@@ -823,6 +916,7 @@ function needsApproval(name, args) {
   if (name === 'crawl_site') return c.crawls;
   if (name === 'generate_image') return c.images;
   if (name === 'generate_video') return c.videos;
+  if (name === 'transcribe_audio' || name === 'listen_to_audio') return c.audio;
   if (name === 'run_javascript' || name === 'run_code') return c.js;
   return false;
 }
@@ -1271,6 +1365,10 @@ async function send() {
       ? `**${a.name}**\n\`\`\`${a.ext}\n${a.text}\n\`\`\``
       : /^image\//.test(a.type)
         ? `🖼 Uploaded image: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). Use look_at_image to see it.`
+        : /^audio\//.test(a.type)
+        ? `🎧 Uploaded audio: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). Use transcribe_audio for the words and listen_to_audio for tone, music and sounds.`
+        : /^video\//.test(a.type)
+        ? `🎬 Uploaded video: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). transcribe_audio and listen_to_audio work on its soundtrack.`
         : `📎 Uploaded file: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). It's in your files sandbox. Use read_file (encoding "base64" for binary) or run_code to work with it.`).join('\n\n');
     attachments = []; renderAttachments();
   }
@@ -1423,6 +1521,9 @@ function fileLinksHTML(m) {
   if (d.output_dir) items.push(`📁 ${esc(d.output_dir)} <a href="${zipUrl(d.output_dir)}">⤓ download .zip</a>`);
   if (['generate_video', 'video_status'].includes(m.name) && /\.(mp4|mov|webm)$/i.test(d.saved_to || '')) {
     items.push(`<video class="shot" src="${fileUrl(d.saved_to)}" ${d.thumbnail ? `poster="${fileUrl(d.thumbnail)}"` : ''} controls playsinline preload="metadata"></video>`);
+  }
+  if (['transcribe_audio', 'listen_to_audio'].includes(m.name) && /\.(mp3|wav|m4a|ogg|oga|flac|aac|webm)$/i.test(d.source || '')) {
+    items.push(`🎧 <a href="${fileUrl(d.source)}" target="_blank">${esc(d.source)}</a><br><audio src="${fileUrl(d.source)}" controls preload="none" style="width:100%;margin-top:6px"></audio>`);
   }
   if (m.name === 'generate_image' && d.saved_to) items.push(`<a href="${fileUrl(d.saved_to)}" target="_blank"><img class="shot gen" src="${fileUrl(d.saved_to)}" alt="generated image"></a>`);
   if (m.name === 'look_at_image' && d.path && !d.error) items.push(`<a href="${fileUrl(d.path)}" target="_blank">👁 ${esc(d.path)}</a><br><a href="${fileUrl(d.path)}" target="_blank"><img class="shot" src="${fileUrl(d.path)}" alt="image"></a>`);
@@ -1642,6 +1743,11 @@ function renderPanel() {
       ${sw('videos.audio', 'Generate audio', 'Voices, sound effects and music synced to the video.')}
       <div class="help" style="font-size:.78em;color:var(--muted);margin:8px 0 4px">GLM can override length, resolution, ratio and audio per video.</div>`
       : '<div class="meta" style="margin-bottom:8px">Add ATLASCLOUD_API_KEY to .env and restart the server to turn this on.</div>'}
+      <div class="section-title">Ears (OpenAI audio)</div>
+      ${caps.audio ? `
+      ${field('Transcription model', `<select data-bind="audio.transcribeModel">${['gpt-4o-transcribe-diarize', 'gpt-transcribe', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'].map(m => `<option ${S.audio.transcribeModel === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'The diarize model labels who is speaking. whisper-1 gives timestamps without speakers; the others give plain text.')}
+      ${field('Listening model', `<select data-bind="audio.listenModel">${['gpt-audio-1.5', 'gpt-audio', 'gpt-audio-mini'].map(m => `<option ${S.audio.listenModel === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'Hears tone, music and sounds, not just words.')}`
+      : '<div class="meta" style="margin-bottom:8px">Add OPENAI_API_KEY to .env and restart the server to turn this on.</div>'}
       <div class="section-title">Vision model</div>
       ${field('Model GLM uses to see images', `<select data-bind="vision.model">${['glm-4.6v', 'glm-4.5v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'Your Coding Plan includes glm-4.6v and glm-4.5v. If the main one fails, look_at_image retries with the backup.')}
       ${field('Backup model', `<select data-bind="vision.fallback"><option value="">None</option>${['glm-4.5v', 'glm-4.6v', 'glm-4.6v-flash'].map(m => `<option ${S.vision.fallback === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
@@ -1657,6 +1763,7 @@ function renderPanel() {
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
       ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}
+      ${sw('tools.confirm.audio', 'Transcribing or listening to audio', 'Billed per minute of audio')}
       ${sw('tools.confirm.videos', 'Generating videos', 'Priced by length and resolution; the priciest tool')}
       ${sw('tools.confirm.js', 'Running code', 'run_javascript and run_code')}
       <div class="section-title">Web access</div>
