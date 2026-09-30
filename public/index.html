@@ -163,6 +163,7 @@ details.reasoning .md { padding: 0 14px 10px; font-size: .9em; color: var(--mute
 .composer-wrap { padding: 10px 16px 16px; }
 .composer { max-width: var(--chat-width); margin: 0 auto; border: 1px solid var(--border); background: var(--panel); border-radius: 18px; padding: 10px 12px; box-shadow: 0 2px 14px rgba(0,0,0,.05); }
 .composer:focus-within { border-color: var(--accent); }
+.composer.drop { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .composer textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; max-height: 40vh; min-height: 26px; }
 .composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .composer .spacer { flex: 1; }
@@ -257,7 +258,7 @@ input[type=checkbox] { accent-color: var(--accent); }
         <div class="attachments" id="attachments"></div>
         <textarea id="input" rows="1" placeholder="Message GLM…"></textarea>
         <div class="row">
-          <button class="icon-btn" id="attachBtn" title="Attach text/code files">📎</button>
+          <button class="icon-btn" id="attachBtn" title="Attach files (or drag and drop / paste)">📎</button>
           <input type="file" id="fileInput" multiple hidden>
           <span class="meta" id="statusLine"></span>
           <div class="spacer"></div>
@@ -1150,8 +1151,11 @@ async function send() {
   if (busy) return;
   let text = $('#input').value.trim();
   if (!text && !attachments.length) return;
+  if (attachments.some(a => a.uploading)) { toast('Wait for uploads to finish'); return; }
   if (attachments.length) {
-    text += (text ? '\n\n' : '') + attachments.map(a => `**${a.name}**\n\`\`\`${a.ext}\n${a.text}\n\`\`\``).join('\n\n');
+    text += (text ? '\n\n' : '') + attachments.map(a => a.text != null
+      ? `**${a.name}**\n\`\`\`${a.ext}\n${a.text}\n\`\`\``
+      : `📎 Uploaded file: \`${a.path}\` (${a.type}, ${fmtBytes(a.size)}). It's in your files sandbox. Use read_file (encoding "base64" for binary) or run_code to work with it.`).join('\n\n');
     attachments = []; renderAttachments();
   }
   if (!cur()) newChat();
@@ -1425,12 +1429,12 @@ function setBusy(b) {
 const setStatus = t => { $('#statusLine').textContent = t; };
 
 function renderAttachments() {
-  $('#attachments').innerHTML = attachments.map((a, i) => `<span class="attachment">📄 ${esc(a.name)} <span class="meta">${(a.text.length / 1000).toFixed(1)}k</span><button class="icon-btn" data-rm="${i}" style="padding:0 2px">✕</button></span>`).join('');
+  $('#attachments').innerHTML = attachments.map((a, i) => `<span class="attachment">${a.text != null ? '📄' : '📦'} ${esc(a.name)} <span class="meta">${a.text != null ? (a.text.length / 1000).toFixed(1) + 'k chars' : a.uploading ? 'uploading…' : fmtBytes(a.size) + ' · saved to files'}</span><button class="icon-btn" data-rm="${i}" style="padding:0 2px">✕</button></span>`).join('');
   updateEstimate();
 }
 
 function updateEstimate() {
-  const chars = $('#input').value.length + attachments.reduce((a, b) => a + b.text.length, 0);
+  const chars = $('#input').value.length + attachments.reduce((a, b) => a + (b.text?.length || 0), 0);
   $('#tokenEstimate').textContent = chars ? `~${Math.ceil(chars / 3.6)} tok` : '';
 }
 
@@ -1788,15 +1792,32 @@ $('#input').addEventListener('keydown', e => {
 });
 $('#input').addEventListener('input', () => { autosize(); updateEstimate(); refreshSendBtn(); });
 $('#attachBtn').onclick = () => $('#fileInput').click();
-$('#fileInput').onchange = async e => {
-  for (const f of e.target.files) {
-    if (f.size > 2e6) { toast(`${f.name} is too big (2MB max)`); continue; }
-    const text = await f.text();
-    if (/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 2000))) { toast(`${f.name} looks binary — GLM 5.3 is text-only`); continue; }
-    attachments.push({ name: f.name, ext: f.name.split('.').pop(), text });
+// Small text files go inline in the message; anything else (PDFs, spreadsheets, images, zips,
+// big text) is saved to files/uploads/ and the message tells GLM where to find it.
+const INLINE_MAX = 2e6, UPLOAD_MAX = 100e6;
+async function addFiles(fileList) {
+  for (const f of fileList) {
+    const name = f.name || `pasted-${Date.now()}.${(f.type.split('/')[1] || 'bin').replace(/[^\w]/g, '')}`;
+    if (f.size > UPLOAD_MAX) { toast(`${name} is too big (100MB max)`); continue; }
+    if (f.size <= INLINE_MAX && !/^(image|audio|video)\//.test(f.type)) {
+      const text = await f.text();
+      if (!/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 2000))) { attachments.push({ name, ext: name.split('.').pop(), text }); renderAttachments(); continue; }
+    }
+    const a = { name, size: f.size, type: f.type || 'unknown type', uploading: true };
+    attachments.push(a); renderAttachments();
+    const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(f); });
+    const out = await callServerTool('write_file', { path: 'uploads/' + name.replace(/[\/\\]/g, '_'), content: b64, encoding: 'base64' }).catch(e => ({ error: e.message }));
+    if (out.error) { attachments.splice(attachments.indexOf(a), 1); toast(`Upload failed: ${out.error}`); }
+    else { a.path = out.path; a.uploading = false; }
+    renderAttachments();
+    if (activeTab === 'files' && !$('#panel').classList.contains('hidden')) loadFileTree();
   }
-  e.target.value = ''; renderAttachments();
-};
+}
+$('#fileInput').onchange = async e => { await addFiles([...e.target.files]); e.target.value = ''; };
+const composerEl = $('.composer');
+composerEl.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); composerEl.classList.add('drop'); } });
+composerEl.addEventListener('dragleave', () => composerEl.classList.remove('drop'));
+composerEl.addEventListener('drop', e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); composerEl.classList.remove('drop'); addFiles([...e.dataTransfer.files]); });
 $('#attachments').onclick = e => { if (e.target.dataset.rm != null) { attachments.splice(+e.target.dataset.rm, 1); renderAttachments(); } };
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!busy) newChat(); }
@@ -1807,11 +1828,7 @@ $('#input').addEventListener('paste', async e => {
   const files = [...e.clipboardData.files];
   if (!files.length) return;
   e.preventDefault();
-  for (const f of files) {
-    if (f.type.startsWith('image/')) { toast('GLM 5.3 is text-only — images aren\'t supported'); continue; }
-    attachments.push({ name: f.name, ext: f.name.split('.').pop(), text: await f.text() });
-  }
-  renderAttachments();
+  addFiles(files);
 });
 
 /* =========================================================
