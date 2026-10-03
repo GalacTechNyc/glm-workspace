@@ -60,6 +60,7 @@ function git(args, opts = {}) {
   return String(r.stdout || '').trim();
 }
 const currentSha = () => git(['rev-parse', 'HEAD']);
+const RUNNING_SHA = (() => { try { return currentSha(); } catch { return null; } })(); // code this watcher process was loaded from
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', ...opts });
   return { code: r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
@@ -121,6 +122,14 @@ const healthy = expectBuild => new Promise(res => {
   check(0);
 });
 
+function warnIfStale() {
+  try {
+    const head = currentSha();
+    if (RUNNING_SHA && head && head !== RUNNING_SHA)
+      log(`WATCHER STALE: running code from ${RUNNING_SHA.slice(0, 7)} but checkout is ${head.slice(0, 7)} — restart \`npm run watch\` to load the new watcher rules`);
+  } catch {}
+}
+
 // --- the update sequence ---
 async function applyUpdate(t) {
   const prev = currentSha();
@@ -152,7 +161,7 @@ async function applyUpdate(t) {
   // 3. restart and health-check; roll back on failure
   await stopServer();
   startServer();
-  if (await healthy(expectBuild)) { log(`update applied: ${t.ref.slice(0, 7)} healthy (build ${expectBuild || '?'})`); return { ok: true }; }
+  if (await healthy(expectBuild)) { log(`update applied: ${t.ref.slice(0, 7)} healthy (build ${expectBuild || '?'})`); warnIfStale(); return { ok: true }; }
   log(`health check FAILED (expected build ${expectBuild || '?'}) — rolling back to ` + prev.slice(0, 7));
   git(['reset', '--hard', prev]);
   await stopServer(); startServer();
@@ -186,7 +195,8 @@ if (require.main === module) {
   if (env.AUTO_UPDATE !== 'on') die('AUTO_UPDATE is not "on" — nothing to do. This is the default.');
   if (!env.UPDATE_SECRET || env.UPDATE_SECRET.length < 16) die('UPDATE_SECRET missing or under 16 chars — refusing to run without HMAC signing');
   git(['rev-parse', '--git-dir']); // must be a git checkout
-  log(`watcher up (poll ${POLL_MS / 1000}s, port ${PORT}, cap ${DAILY_CAP}/day, gap ${MIN_GAP_MS / 60000}min)`);
+  log(`watcher up (poll ${POLL_MS / 1000}s, port ${PORT}, cap ${DAILY_CAP}/day, gap ${MIN_GAP_MS / 60000}min, code ${RUNNING_SHA ? RUNNING_SHA.slice(0, 7) : '?'})`);
+  warnIfStale();
   setInterval(() => loop().catch(e => log('loop error: ' + e.message)), POLL_MS);
 }
 

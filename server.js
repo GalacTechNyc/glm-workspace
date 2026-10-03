@@ -24,6 +24,17 @@ const ENDPOINTS = {
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
 
+// Headless autopilot (fails soft: if autopilot.js is broken the server still runs)
+let autopilot = null;
+try { autopilot = require('./autopilot'); } catch (e) { console.error('autopilot disabled:', e.message); }
+function autoRoute(pathname, req, res) {
+  if (!autopilot) { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'autopilot.js failed to load — check the server console' })); return true; }
+  if (pathname === '/api/auto/start' && req.method === 'POST') { readBody(req).then(b => autopilot.start(JSON.parse(b || '{}'), res)).catch(e => { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }); return true; }
+  if (pathname === '/api/auto/stop' && req.method === 'POST') { autopilot.stop(res); return true; }
+  if (pathname === '/api/auto/status') { autopilot.status(res); return true; }
+  return false;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -210,6 +221,7 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(fs.existsSync(CHATS_FILE) ? fs.readFileSync(CHATS_FILE) : 'null');
   }
+  if (autoRoute(url.pathname, req, res)) return;
   if (url.pathname === '/api/search' && req.method === 'POST') return webSearch(req, res);
   if (url.pathname === '/api/search/providers') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

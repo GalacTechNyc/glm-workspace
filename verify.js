@@ -120,8 +120,27 @@ async function main() {
         };
         ping();
       });
+      // second phase: the tool API route must work too. A server whose /api/* routing
+      // is broken (dangling handler, missing require) still serves / with 200 — that
+      // exact regression slipped through an earlier gate. Probe it for real.
+      let apiOk = false, apiBuild = null;
+      if (up === true) {
+        apiOk = await new Promise(res => {
+          const post = n => {
+            const req = http.request({ host: '127.0.0.1', port, path: '/api/tools/capabilities', method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GLM-Workspace': '1' } }, r => {
+              let b = '';
+              r.on('data', d => b += d);
+              r.on('end', () => { try { const j = JSON.parse(b); apiBuild = j.build || null; res(r.statusCode === 200 && !j.error); } catch { res(false); } });
+            });
+            req.on('error', () => n > 40 ? res(false) : setTimeout(() => post(n + 1), 400));
+            req.end();
+          };
+          post(0);
+        });
+      }
       child.kill('SIGKILL');
-      step(up === true, 'server boots and serves /', up ? `HTTP 200 on :${port} in ${((Date.now() - t0) / 1000).toFixed(1)}s` : 'no 200 within 20s (log in os.tmpdir())');
+      step(up === true, 'server boots and serves /', up ? `HTTP 200 on :${port} in ${((Date.now() - t0) / 1000).toFixed(1)}s` : 'no 200 within 20s');
+      step(apiOk === true, 'tool API responds (/api/tools/capabilities)', apiOk ? `build ${apiBuild || '?'}` : 'route broken (dead handler? missing require?)');
     }
   }
 
