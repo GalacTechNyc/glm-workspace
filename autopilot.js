@@ -28,6 +28,7 @@ const SCHEMAS = {
   forget: { name: 'forget', description: 'Delete a memory by id.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
   search_chats: { name: 'search_chats', description: 'Search past conversations for words or a phrase.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer' } } } },
   read_chat: { name: 'read_chat', description: 'Read a past conversation by chat_id.', parameters: { type: 'object', properties: { chat_id: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['chat_id'] } },
+  submit_update: { name: 'submit_update', description: 'Propose updating the app itself to a specific commit. The watcher process independently verifies (tests + smoke boot) before anything restarts, and rolls back on failure. Use for improvements to this workspace you have already pushed as a commit.', parameters: { type: 'object', properties: { ref: { type: 'string', description: 'Full or short commit sha to move to.' }, note: { type: 'string', description: 'What this update does, one line.' } }, required: ['ref'] } },
 };
 
 function guard(name, args, cfg) {
@@ -40,6 +41,8 @@ function guard(name, args, cfg) {
     return { error: 'Blocked: GitHub writes need allowWrites:true on the run.' };
   if ((name === 'write_file' || name === 'delete_file') && !cfg.allowWrites && /^root:/.test(String(args.path || '')))
     return { error: 'Blocked: writing outside the files sandbox needs allowWrites:true on the run.' };
+  if (name === 'submit_update' && !cfg.allowUpdates)
+    return { error: 'Blocked: self-update needs allowUpdates:true on the run (the watcher still verifies everything independently).' };
   return null;
 }
 
@@ -141,7 +144,9 @@ async function runLoop(cfg) {
 
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
-module.exports = {
+// exported for verify.js invariant tests
+const _guard = guard;
+module.exports = { _guard,
   start(cfg, res) {
     if (!KEY) return send(res, 200, { error: 'Missing ZAI_API_KEY' });
     if (RUN.active) return send(res, 200, { error: 'A headless run is already active', status: this.statusPayload() });
@@ -157,6 +162,7 @@ module.exports = {
         readOnlyWeb: cfg.readOnlyWeb !== false,
         allowCommands: cfg.allowCommands === true,
         allowWrites: cfg.allowWrites === true,
+        allowUpdates: cfg.allowUpdates === true,
       },
     });
     runLoop(RUN.cfg);

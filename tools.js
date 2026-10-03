@@ -467,7 +467,8 @@ async function clear_sessions(o = {}) {
 
 async function capabilities() {
   return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()],
-    extra_roots: EXTRA_ROOTS.map(r => ({ name: r.name, write: r.write })) };
+    extra_roots: EXTRA_ROOTS.map(r => ({ name: r.name, write: r.write })),
+    self_update: readEnvFile().AUTO_UPDATE === 'on' && !!(readEnvFile().UPDATE_SECRET || '') };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -963,11 +964,50 @@ async function mcp_call(o) {
   return { server: o.server, tool: o.tool, ...(msg?.result?.isError ? { is_error: true } : {}), result: parsed ?? (joined || null) };
 }
 
+/* ---------------- submit_update: propose a self-update for the watcher ----------------
+   Writes a signed trigger (data/auto-update.json). The watcher — a separate
+   process — verifies the commit (verify.js: syntax, invariants, smoke boot on a
+   spare port) before fast-forwarding main, restarting, and health-checking the
+   server, with automatic rollback. This tool only *proposes*. */
+function readEnvFile() {
+  const out = {};
+  try {
+    for (const line of require('fs').readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m) out[m[1]] = m[2];
+    }
+  } catch {}
+  return out;
+}
+function signRef(ref) {
+  const env = readEnvFile();
+  const sec = env.UPDATE_SECRET || '';
+  if (!sec) throw new Error('Self-update is not configured: set UPDATE_SECRET (16+ chars) and AUTO_UPDATE=on in .env.');
+  return { ref, sig: require('crypto').createHmac('sha256', sec).update(ref).digest('hex') };
+}
+async function submit_update(o) {
+  if (!o || !/^[0-9a-f]{7,40}$/.test(String(o.ref || ''))) throw new Error('ref must be a commit sha (7-40 hex chars)');
+  if (readEnvFile().AUTO_UPDATE !== 'on') throw new Error('Self-update is off (AUTO_UPDATE != on in .env). Nothing was written.');
+  const short = String(o.ref).slice(0, 7);
+  const { spawnSync } = require('child_process');
+  const check = spawnSync('git', ['cat-file', '-e', `${o.ref}^{commit}`], { cwd: __dirname, encoding: 'utf8' });
+  if (check.status !== 0) throw new Error(`${short} is not a commit in this checkout (did the branch get pushed/fetched?)`);
+  const t = signRef(String(o.ref));
+  const fsx = require('fs');
+  fsx.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+  fsx.writeFileSync(path.join(__dirname, 'data', 'auto-update.json'), JSON.stringify({ ...t, note: String(o.note || '').slice(0, 200), requested: new Date().toISOString() }, null, 2));
+  return {
+    proposed: short,
+    note: 'Trigger written. The watcher verifies this commit (syntax, invariants, smoke boot), then updates, restarts, health-checks, and rolls back on failure. It acts within ~20s if idle; if the cap is hit it may skip. Status: data/updatelog.md.',
+    ...(o.note ? { your_note: String(o.note).slice(0, 200) } : {}),
+  };
+}
+
 const TOOLS = {
   http_request, render_page, crawl_site, list_files, read_file, write_file, delete_file, clear_sessions, capabilities,
   memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
   generate_video, video_status, transcribe_chunks, listen_audio,
-  github_api, run_command, mcp_list, mcp_call,
+  github_api, run_command, mcp_list, mcp_call, submit_update,
 };
 
 /* ---------------- HTTP glue ---------------- */
@@ -1032,4 +1072,6 @@ async function callTool(name, args = {}) {
   catch (e) { throw new Error(e.message.split(FILES_ROOT + path.sep).join('').split(FILES_ROOT).join('files')); }
 }
 
-module.exports = { handleTool, serveFile, serveZip, callTool, loadMemory, EXTRA_ROOTS };
+// internal exports for verify.js (the gate the watcher runs before any update)
+module.exports = { handleTool, serveFile, serveZip, callTool, loadMemory, EXTRA_ROOTS,
+  _internals: { safePath, relPath, findExtraRoot, EXTRA_ROOTS, readEnvFile } };

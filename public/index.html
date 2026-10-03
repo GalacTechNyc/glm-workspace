@@ -335,9 +335,9 @@ const DEFAULTS = {
       list_files: true, read_file: true, write_file: true, delete_file: true,
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
       look_at_image: true, transcribe_audio: true, listen_to_audio: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
-      github_api: true, run_command: false, mcp_list: true, mcp_call: true,
+      github_api: true, run_command: false, mcp_list: true, mcp_call: true, submit_update: false,
     },
-    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false, outsideWrites: true },
+    confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false, outsideWrites: true, updates: true },
     custom: [EXAMPLE_TOOL],
   },
   auto: { unlimited: false, goal: '', maxCycles: 20, minutes: 30, pauseSec: 5, roundsPerCycle: 10, approvals: 'deny', readOnlyWeb: true, newChat: true, prompt: '' },
@@ -580,6 +580,18 @@ Object.assign(BUILTINS, {
     group: 'MCP', server: true, needs: 'mcp',
     def: { name: 'mcp_list', description: 'List the MCP servers configured via MCP_SERVERS in .env and the tools each exposes (name, description, parameters).', parameters: { type: 'object', properties: {} } },
     run: async () => { const r = await callServerTool('mcp_list', {}); if (!r.error) mcpInfo = r; return r; },
+  },
+  submit_update: {
+    group: 'System', server: true, needs: 'selfUpdate',
+    def: {
+      name: 'submit_update',
+      description: "Propose updating this app to a specific commit of its own repo. The change must already be pushed; a separate watcher process then runs the full verification suite (syntax, path/guard invariants, smoke boot on a spare port) before anything restarts, health-checks the server, and rolls back automatically if it's broken. This tool only writes a signed proposal — nothing restarts from inside the server. Check data/updatelog.md afterwards.",
+      parameters: { type: 'object', properties: {
+        ref: { type: 'string', description: 'Commit sha to update to (must exist in the local checkout).' },
+        note: { type: 'string', description: 'One line: what this update changes.' },
+      }, required: ['ref'] },
+    },
+    run: args => callServerTool('submit_update', args),
   },
   mcp_call: {
     group: 'MCP', server: true, needs: 'mcp',
@@ -975,6 +987,7 @@ function needsApproval(name, args) {
   if (name === 'transcribe_audio' || name === 'listen_to_audio') return c.audio;
   if (name === 'run_javascript' || name === 'run_code') return c.js;
   if (name === 'run_command') return c.commands;
+  if (name === 'submit_update') return c.updates;
   if (name === 'mcp_call') return c.mcp;
   if (name === 'github_api') return c.nonGet && !['GET', 'HEAD', 'OPTIONS'].includes(String(args.method || 'GET').toUpperCase());
   return false;
@@ -1787,7 +1800,7 @@ function renderPanel() {
       ${field('Tool choice', `<select data-bind="tools.toolChoice"><option ${S.tools.toolChoice === 'auto' ? 'selected' : ''}>auto</option><option ${S.tools.toolChoice === 'none' ? 'selected' : ''}>none</option><option ${S.tools.toolChoice === 'required' ? 'selected' : ''}>required</option></select>`, '')}
       ${field('Max tool rounds per turn', `<input type="number" min="1" max="50" data-bind="tools.maxRounds" value="${S.tools.maxRounds}">`)}
       ${['Web', 'Files', 'System', 'Media', 'Memory', 'Compute', 'MCP'].map(g => `<div class="section-title">${g} tools</div>` + Object.keys(BUILTINS).filter(k => BUILTINS[k].group === g).map(k =>
-        sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? ({ chrome: 'Unavailable: Chrome not found on this Mac.', github: 'Unavailable: add GITHUB_TOKEN to .env and restart.', shell: 'Unavailable: add COMMAND_ALLOWLIST to .env and restart.', mcp: 'Unavailable: add MCP_SERVERS=name=url to .env and restart.' })[BUILTINS[k].needs] || 'Unavailable: not configured.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
+        sw('tools.builtins.' + k, k, BUILTINS[k].needs && !caps[BUILTINS[k].needs] ? ({ chrome: 'Unavailable: Chrome not found on this Mac.', github: 'Unavailable: add GITHUB_TOKEN to .env and restart.', shell: 'Unavailable: add COMMAND_ALLOWLIST to .env and restart.', mcp: 'Unavailable: add MCP_SERVERS=name=url to .env and restart.', selfUpdate: 'Unavailable: set AUTO_UPDATE=on + UPDATE_SECRET in .env and run the watcher.' })[BUILTINS[k].needs] || 'Unavailable: not configured.' : BUILTINS[k].def.description.split('. ')[0] + '.')).join('')).join('')}
       <div class="section-title">Image generation (OpenAI)</div>
       ${caps.images ? `
       ${field('Model', `<select data-bind="images.model">${['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'].map(m => `<option ${S.images.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, 'gpt-image-1-mini is the cheapest. The 2.5 models are the newest.')}
@@ -1823,6 +1836,7 @@ function renderPanel() {
       ${sw('tools.confirm.nonGet', 'HTTP requests that change things', 'POST, PUT, PATCH, DELETE')}
       ${sw('tools.confirm.crawls', 'Crawling a site')}
       ${sw('tools.confirm.commands', 'Running shell commands', 'run_command — allowlisted binaries, no shell')}
+      ${sw('tools.confirm.updates', 'Proposing app self-updates', 'submit_update — watcher still verifies independently')}
       ${sw('tools.confirm.outsideWrites', 'Writing outside the files sandbox', 'root:name paths from EXTRA_ROOTS')}
       ${sw('tools.confirm.mcp', 'Calling MCP tools')}
       ${sw('tools.confirm.images', 'Generating images', 'Each one costs OpenAI credit')}

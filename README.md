@@ -62,7 +62,19 @@ curl -s localhost:5173/api/auto/status   # progress + log tail
 curl -s -X POST localhost:5173/api/auto/stop
 ```
 
-`readOnlyWeb` (default true), `allowCommands` and `allowWrites` are per-run flags on the start call. Without a human to approve prompts, confirm-worthy actions are denied rather than guessed at — flip the flags explicitly when you want more.
+`readOnlyWeb` (default true), `allowCommands`, `allowWrites` and `allowUpdates` are per-run flags on the start call. Without a human to approve prompts, confirm-worthy actions are denied rather than guessed at — flip the flags explicitly when you want more.
+
+## Self-update loop (off by default)
+
+The workspace can accept updates to itself through a chain designed so nothing restarts on a model's word alone:
+
+1. **Propose** — `submit_update(ref)` (interactive or autopilot) writes an HMAC-signed trigger to `data/auto-update.json`. Inert on its own; requires `AUTO_UPDATE=on` + `UPDATE_SECRET` in `.env` even to write.
+2. **Verify** — `npm run watch` (a separate process, the only part with restart rights) checks the proposal out into a temp worktree and runs `verify.js` there: syntax checks on every JS file, the inline UI script, path/guard invariant tests against the real code, and a smoke boot of the server on a spare port that must answer HTTP 200.
+3. **Apply or roll back** — only then does it fast-forward, restart, and health-check the live server. Failed health check → automatic rollback to the previous commit and restart. Bad verify → nothing happens.
+
+Breakers: `touch data/STOP` (or `AUTO_UPDATE=off`) kills it; max 1 update per 15 min and 10/day; 3 consecutive failed verifies self-disable the watcher until a human deletes `data/watcher.disabled`. Everything lands in `data/updatelog.md`.
+
+Run it: `AUTO_UPDATE=on` + a 16+ char `UPDATE_SECRET` in `.env`, then `npm run watch` in a second terminal.
 
 ## Where things live
 
