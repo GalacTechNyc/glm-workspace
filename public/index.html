@@ -40,7 +40,8 @@ html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--font-size); line-height: 1.55; overflow: hidden; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-.app { display: grid; grid-template-columns: 260px 1fr auto; height: 100vh; }
+.app { display: grid; grid-template-columns: 260px 1fr auto; height: 100vh; position: relative; z-index: 1; }
+#bg3d { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 .app.no-sidebar { grid-template-columns: 0 1fr auto; }
 .app.no-sidebar .sidebar { display: none; }
 
@@ -221,6 +222,7 @@ input[type=checkbox] { accent-color: var(--accent); }
 <style id="custom-css"></style>
 </head>
 <body>
+<canvas id="bg3d" aria-hidden="true"></canvas>
 <div class="app" id="app">
   <aside class="sidebar">
     <div class="top">
@@ -349,7 +351,7 @@ const DEFAULTS = {
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
   search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
-  look: { expandSearch: true, theme: 'system', accent: 'default', fontSize: 15, width: 820, font: 'inter', bubbles: false, radius: 14, showReasoning: true, showMeta: true, enterSends: true, customCss: '' },
+  look: { expandSearch: true, theme: 'system', accent: 'default', bg: 'stars', fontSize: 15, width: 820, font: 'inter', bubbles: false, radius: 14, showReasoning: true, showMeta: true, enterSends: true, customCss: '' },
 };
 function deepMerge(base, over) {
   if (Array.isArray(base) || typeof base !== 'object' || base === null) return over ?? base;
@@ -1911,6 +1913,7 @@ function renderPanel() {
       ${field('Chat width', `<input type="range" min="560" max="1400" step="20" data-bind="look.width" value="${S.look.width}">`, '', S.look.width + 'px')}
       ${field('Corner radius', `<input type="range" min="0" max="24" step="1" data-bind="look.radius" value="${S.look.radius}">`, '', S.look.radius + 'px')}
       ${sw('look.bubbles', 'Assistant bubbles', 'Card around assistant replies.')}
+      ${sw('look.bg', '3D starfield background', 'Slow perspective starfield behind the chat, tinted with the accent. Off for reduced-motion users.')}
       ${sw('look.showReasoning', 'Show reasoning', 'Display the model\'s thinking.')}
       ${sw('look.showMeta', 'Show stats', 'Tokens, speed, latency under messages.')}
       ${sw('look.enterSends', 'Enter sends', 'Off = ⌘/Ctrl+Enter to send.')}
@@ -1924,6 +1927,51 @@ function migrateLook() {
   // to the 'default' sentinel once so shipped themes reach existing profiles
   if (S.look && S.look.accent === '#6d5dfc' && !S.look.accentMigrated) { S.look.accent = 'default'; S.look.accentMigrated = true; saveSettings(); }
 }
+/* ---------- 3D starfield background (zero-dependency, accent-tinted) ---------- */
+const bg3d = { raf: null, stars: [], W: 0, H: 0, accent: '', frame: 0 };
+function bg3dResize() {
+  const c = $('#bg3d'), dpr = Math.min(devicePixelRatio || 1, 2);
+  bg3d.W = innerWidth; bg3d.H = innerHeight;
+  c.width = bg3d.W * dpr; c.height = bg3d.H * dpr;
+  c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function bg3dInit() {
+  bg3d.stars = Array.from({ length: 130 }, () => ({ x: (Math.random() * 2 - 1), y: (Math.random() * 2 - 1), z: 0.08 + Math.random() * 0.92, w: Math.random() < 0.14 }));
+}
+function bg3dTick() {
+  const c = $('#bg3d'); if (!c) return;
+  const ctx = c.getContext('2d');
+  if (bg3d.frame++ % 60 === 0) bg3d.accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff6a2b';
+  ctx.clearRect(0, 0, bg3d.W, bg3d.H);
+  const cx = bg3d.W / 2, cy = bg3d.H / 2;
+  for (const s of bg3d.stars) {
+    s.z -= 0.0011;
+    if (s.z <= 0.05) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; }
+    const sx = cx + (s.x / s.z) * cx * 0.9, sy = cy + (s.y / s.z) * cy * 0.9;
+    if (sx < -4 || sx > bg3d.W + 4 || sy < -4 || sy > bg3d.H + 4) continue;
+    const d = 1 - s.z;
+    ctx.globalAlpha = 0.12 + d * 0.38;
+    ctx.fillStyle = s.w ? getComputedStyle(document.body).color : bg3d.accent;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 0.4 + d * 1.7, 0, 7);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  bg3d.raf = requestAnimationFrame(bg3dTick);
+}
+function bg3dStart() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (bg3d.raf) return;
+  bg3dResize(); bg3dInit();
+  addEventListener('resize', bg3dResize, { passive: true });
+  bg3d.raf = requestAnimationFrame(bg3dTick);
+}
+function bg3dStop() {
+  if (bg3d.raf) cancelAnimationFrame(bg3d.raf);
+  bg3d.raf = null;
+  const c = $('#bg3d'); if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, bg3d.W, bg3d.H); }
+}
+
 function applyLook() {
   migrateLook();
   const L = S.look, r = document.documentElement;
@@ -1934,6 +1982,7 @@ function applyLook() {
   r.style.setProperty('--radius', L.radius + 'px');
   r.style.setProperty('--font', { inter: "'Inter', system-ui, sans-serif", system: 'system-ui, -apple-system, sans-serif', serif: "'Source Serif 4', Georgia, serif", mono: "'JetBrains Mono', monospace" }[L.font]);
   document.body.classList.toggle('bubbles', L.bubbles);
+  if (L.bg === 'stars') bg3dStart(); else bg3dStop();
   $('#custom-css').textContent = L.customCss;
 }
 
