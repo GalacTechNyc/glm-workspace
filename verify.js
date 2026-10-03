@@ -23,7 +23,7 @@ async function main() {
   console.log('verify: syntax');
 
   // 1. node --check on every JS file (uses the node binary itself; no dependencies)
-  const JS = ['server.js', 'tools.js', 'autopilot.js', 'watcher.js', 'verify.js', 'public/runtime-worker.js'];
+  const JS = ['server.js', 'tools.js', 'autopilot.js', 'watcher.js', 'watch.js', 'verify.js', 'public/runtime-worker.js'];
   for (const f of JS) {
     if (!fs.existsSync(path.join(ROOT, f))) { note(`syntax ${f} skipped (file absent)`); continue; }
     const r = spawnSync(process.execPath, ['--check', path.join(ROOT, f)], { encoding: 'utf8' });

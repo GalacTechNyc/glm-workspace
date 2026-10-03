@@ -130,8 +130,11 @@ function warnIfStale() {
     // warning on every apply trains people to ignore warnings
     let touched = true;
     try { touched = git(['diff', '--name-only', RUNNING_SHA, head, '--', 'watcher.js']).trim().length > 0; } catch {}
-    if (touched) log(`WATCHER STALE: running code from ${RUNNING_SHA.slice(0, 7)} but checkout is ${head.slice(0, 7)} — restart \`npm run watch\` to load the new watcher rules`);
-    else log(`note: checkout moved to ${head.slice(0, 7)} (watcher.js unchanged — running rules still current)`);
+    if (touched) {
+      // under the watch.js supervisor, reload automatically instead of nagging to restart
+      if (process.env.WATCH_SUPERVISED === '1') { log(`reloading watcher: ${RUNNING_SHA.slice(0, 7)} -> ${head.slice(0, 7)} (watcher.js changed)`); process.exit(75); }
+      log(`WATCHER STALE: running code from ${RUNNING_SHA.slice(0, 7)} but checkout is ${head.slice(0, 7)} — restart \`npm run watch\` to load the new watcher rules`);
+    } else log(`note: checkout moved to ${head.slice(0, 7)} (watcher.js unchanged — running rules still current)`);
   } catch {}
 }
 
