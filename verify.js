@@ -112,7 +112,12 @@ async function main() {
       const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(port) }, stdio: ['ignore', out, out] });
       const t0 = Date.now();
       const up = await new Promise(res => {
-        const ping = () => http.get(`http://127.0.0.1:${port}/`, r => res(r.statusCode === 200), () => Date.now() - t0 < 20000 ? setTimeout(ping, 400) : res(false));
+        const ping = () => {
+          // http.get's 3rd arg is NOT an error handler — must attach .on('error'),
+          // or the ECONNREFUSED while the server is still booting crashes verify itself.
+          const req = http.get(`http://127.0.0.1:${port}/`, r => { r.resume(); res(r.statusCode === 200); });
+          req.on('error', () => Date.now() - t0 < 20000 ? setTimeout(ping, 400) : res(false));
+        };
         ping();
       });
       child.kill('SIGKILL');
