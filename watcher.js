@@ -35,6 +35,7 @@ const MIN_GAP_MS = 15 * 60_000;
 const DAILY_CAP = 10;
 
 fs.mkdirSync(DATA, { recursive: true });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toISOString();
 const log = line => { const l = `${stamp()} ${line}`; fs.appendFileSync(LOG, l + '\n'); console.log('[watcher]', line); };
 const die = msg => { log('FATAL ' + msg); process.exit(1); };
@@ -82,16 +83,42 @@ function signTrigger(ref) {
 }
 
 // --- server control ---
-const serverPids = () => String(run('lsof', ['-ti', `127.0.0.1:${PORT}`, '-sTCP:LISTEN']).out).split('\n').filter(Boolean);
-function stopServer() { for (const pid of serverPids()) { try { process.kill(Number(pid), 'SIGTERM'); } catch {} } }
+const serverPids = () => String(run('lsof', ['-ti', `:${PORT}`, '-sTCP:LISTEN']).out).split('\n').filter(Boolean);
+// SIGTERM, wait for the port to actually free, then SIGKILL stragglers and wait again.
+// (The address-filtered lsof missed user-launched servers bound on other families —
+// the "zombie old server passes health check" bug.)
+async function stopServer() {
+  const term = serverPids();
+  for (const pid of term) { try { process.kill(Number(pid), 'SIGTERM'); } catch {} }
+  for (let i = 0; i < 25 && serverPids().length; i++) await sleep(200);
+  const stuck = serverPids();
+  if (stuck.length) { log('port still held after SIGTERM — SIGKILL ' + stuck.join(' ')); for (const pid of stuck) { try { process.kill(Number(pid), 'SIGKILL'); } catch {} } }
+  for (let i = 0; i < 15 && serverPids().length; i++) await sleep(200);
+  if (serverPids().length) log('WARNING: port ' + PORT + ' still occupied after SIGKILL');
+}
 function startServer() {
   const out = fs.openSync(path.join(DATA, 'server.log'), 'a');
   return spawn(process.execPath, ['server.js'], { cwd: ROOT, detached: true, stdio: ['ignore', out, out] }).unref();
 }
-const healthy = () => new Promise(res => {
+// Healthy means: a server answers AND (when expected) it reports the exact build
+// from the candidate commit. An old zombie still holding the port must NOT pass.
+const healthy = expectBuild => new Promise(res => {
+  const done = v => { clearTimeout(t); res(v); };
   const t = setTimeout(() => res(false), 30_000);
-  const ping = n => http.get(`http://127.0.0.1:${PORT}/`, r => { clearTimeout(t); res(r.statusCode === 200); }, () => n > 75 ? (clearTimeout(t), res(false)) : setTimeout(() => ping(n + 1), 400));
-  ping(0);
+  const check = n => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, path: '/api/tools/capabilities', method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GLM-Workspace': '1' } }, r => {
+      let b = '';
+      r.on('data', d => b += d);
+      r.on('end', () => {
+        if (r.statusCode !== 200) return n > 75 ? done(false) : setTimeout(() => check(n + 1), 400);
+        try { const j = JSON.parse(b); done(!expectBuild || j.build === expectBuild); }
+        catch { done(false); }
+      });
+    });
+    req.on('error', () => n > 75 ? done(false) : setTimeout(() => check(n + 1), 400));
+    req.end();
+  };
+  check(0);
 });
 
 // --- the update sequence ---
@@ -105,9 +132,10 @@ async function applyUpdate(t) {
   fs.rmSync(tmp, { recursive: true, force: true });
   git(['worktree', 'add', '--quiet', '--detach', tmp, t.ref]);
   try { fs.copyFileSync(path.join(ROOT, '.env'), path.join(tmp, '.env')); } catch {} // smoke boot needs a key
-  let verdict;
+  let verdict, expectBuild = null;
   try {
     verdict = run(process.execPath, ['verify.js'], { cwd: tmp });
+    try { expectBuild = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf8')).version; } catch {}
   } finally {
     try { git(['worktree', 'remove', '--force', tmp]); } catch {}
     try { git(['worktree', 'prune']); } catch {}
@@ -122,13 +150,12 @@ async function applyUpdate(t) {
   git(['reset', '--hard', t.ref]); // we only ever get here after a clean verify
 
   // 3. restart and health-check; roll back on failure
-  stopServer();
-  await new Promise(r => setTimeout(r, 1200));
+  await stopServer();
   startServer();
-  if (await healthy()) { log(`update applied: ${t.ref.slice(0, 7)} healthy`); return { ok: true }; }
-  log('health check FAILED — rolling back to ' + prev.slice(0, 7));
+  if (await healthy(expectBuild)) { log(`update applied: ${t.ref.slice(0, 7)} healthy (build ${expectBuild || '?'})`); return { ok: true }; }
+  log(`health check FAILED (expected build ${expectBuild || '?'}) — rolling back to ` + prev.slice(0, 7));
   git(['reset', '--hard', prev]);
-  stopServer(); await new Promise(r => setTimeout(r, 1200)); startServer();
+  await stopServer(); startServer();
   const recovered = await healthy();
   log(recovered ? 'rollback healthy' : 'ROLLBACK ALSO UNHEALTHY — server needs human attention');
   return { ok: false, stage: 'health', recovered };
