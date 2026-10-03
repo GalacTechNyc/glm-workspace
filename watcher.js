@@ -125,8 +125,13 @@ const healthy = expectBuild => new Promise(res => {
 function warnIfStale() {
   try {
     const head = currentSha();
-    if (RUNNING_SHA && head && head !== RUNNING_SHA)
-      log(`WATCHER STALE: running code from ${RUNNING_SHA.slice(0, 7)} but checkout is ${head.slice(0, 7)} — restart \`npm run watch\` to load the new watcher rules`);
+    if (!RUNNING_SHA || !head || head === RUNNING_SHA) return;
+    // only nag when the watcher's OWN code changed between the two commits —
+    // warning on every apply trains people to ignore warnings
+    let touched = true;
+    try { touched = git(['diff', '--name-only', RUNNING_SHA, head, '--', 'watcher.js']).trim().length > 0; } catch {}
+    if (touched) log(`WATCHER STALE: running code from ${RUNNING_SHA.slice(0, 7)} but checkout is ${head.slice(0, 7)} — restart \`npm run watch\` to load the new watcher rules`);
+    else log(`note: checkout moved to ${head.slice(0, 7)} (watcher.js unchanged — running rules still current)`);
   } catch {}
 }
 
