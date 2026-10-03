@@ -15,6 +15,9 @@ const ROOT = __dirname;
 let failures = 0, notes = 0;
 const step = (ok, label, detail = '') => { console.log(`${ok ? '  ok' : '  FAIL'} ${label}${detail ? ' — ' + detail : ''}`); if (!ok) failures++; };
 const note = (label, detail = '') => { console.log(`  --  ${label}${detail ? ' — ' + detail : ''}`); notes++; };
+const throws = fn => { try { fn(); return false; } catch { return true; } };
+// run one assertion; a throw is a FAIL for that line, never a suite crash
+const ok = (label, fn) => { try { step(fn(), label); } catch (e) { step(false, label, 'threw: ' + String(e.message).slice(0, 80)); } };
 
 async function main() {
   console.log('verify: syntax');
@@ -48,7 +51,8 @@ async function main() {
   // 3. invariant tests against the REAL path code (not a copy): safePath / relPath / EXTRA_ROOTS
   console.log('verify: path invariants');
   {
-    const t1 = path.join(os.tmpdir(), 'glm-verify-projects'), t2 = path.join(os.tmpdir(), 'glm-verify-www');
+    const FX = path.join(os.tmpdir(), 'glm-verify-fixture');
+    const t1 = path.join(FX, 'projects'), t2 = path.join(FX, 'www'); // basenames become the root names
     fs.mkdirSync(t1, { recursive: true }); fs.mkdirSync(t2, { recursive: true });
     const prev = process.env.EXTRA_ROOTS;
     process.env.EXTRA_ROOTS = `${t1}:rw,${t2}:r`;
@@ -58,17 +62,16 @@ async function main() {
     if (!internals) step(false, 'tools.js exports _internals', 'required by the watcher gate');
     else {
       const { safePath, relPath, EXTRA_ROOTS } = internals;
-      const throws = fn => { try { fn(); return false; } catch { return true; } };
       step(EXTRA_ROOTS.length === 2 && EXTRA_ROOTS[0].write === true && EXTRA_ROOTS[1].write === false, 'EXTRA_ROOTS parsed (rw/r)');
-      step(safePath('a/b.txt') === path.join(ROOT, 'files', 'a', 'b.txt'), 'sandbox path resolves');
-      step(safePath('root:projects/x.js') === path.join(t1, 'x.js'), 'root:name path resolves');
-      step(safePath('root:projects/x.js', { write: true }) === path.join(t1, 'x.js'), 'rw root accepts writes');
-      step(throws(() => safePath('root:www/x', { write: true })), 'ro root write blocked');
-      step(throws(() => safePath('root:nope/x')), 'unknown root blocked');
-      step(throws(() => safePath('/etc/passwd')), 'absolute path outside roots blocked');
-      step(throws(() => safePath('root:projects/../../etc/passwd')), 'root traversal blocked');
-      step(throws(() => safePath('../../etc/passwd')), 'sandbox traversal blocked');
-      step(relPath(path.join(t1, 'a.js')) === 'root:projects/a.js', 'relPath labels roots');
+      ok('sandbox path resolves', () => safePath('a/b.txt') === path.join(ROOT, 'files', 'a', 'b.txt'));
+      ok('root:name path resolves', () => safePath('root:projects/x.js') === path.join(t1, 'x.js'));
+      ok('rw root accepts writes', () => safePath('root:projects/x.js', { write: true }) === path.join(t1, 'x.js'));
+      ok('ro root write blocked', () => throws(() => safePath('root:www/x', { write: true })));
+      ok('unknown root blocked', () => throws(() => safePath('root:nope/x')));
+      ok('absolute path outside roots blocked', () => throws(() => safePath('/etc/passwd')));
+      ok('root traversal blocked', () => throws(() => safePath('root:projects/../../etc/passwd')));
+      ok('sandbox traversal blocked', () => throws(() => safePath('../../etc/passwd')));
+      ok('relPath labels roots', () => relPath(path.join(t1, 'a.js')) === 'root:projects/a.js');
     }
   }
 
@@ -81,15 +84,15 @@ async function main() {
     else {
       const cfg = { readOnlyWeb: true, allowCommands: false, allowWrites: false, allowUpdates: false };
       const blocked = (name, args, c = cfg) => g(name, args, c) !== null;
-      step(blocked('http_request', { method: 'POST' }), 'non-GET web blocked (readOnlyWeb)');
-      step(!blocked('http_request', { method: 'GET' }), 'GET web allowed');
-      step(blocked('run_command', { command: 'x' }), 'commands blocked without allowCommands');
-      step(!blocked('run_command', { command: 'x' }, { ...cfg, allowCommands: true }), 'commands allowed with flag');
-      step(blocked('write_file', { path: 'root:projects/a' }), 'root writes blocked without allowWrites');
-      step(!blocked('write_file', { path: 'autopilot/x.md' }), 'sandbox writes allowed');
-      step(blocked('github_api', { method: 'POST' }), 'github writes blocked (non-GET)');
-      step(blocked('submit_update', { ref: 'x' }), 'self-update blocked without allowUpdates');
-      step(!blocked('submit_update', { ref: 'x' }, { ...cfg, allowUpdates: true }), 'self-update allowed with flag');
+      ok('non-GET web blocked (readOnlyWeb)', () => blocked('http_request', { method: 'POST' }));
+      ok('GET web allowed', () => !blocked('http_request', { method: 'GET' }));
+      ok('commands blocked without allowCommands', () => blocked('run_command', { command: 'x' }));
+      ok('commands allowed with flag', () => !blocked('run_command', { command: 'x' }, { ...cfg, allowCommands: true }));
+      ok('root writes blocked without allowWrites', () => blocked('write_file', { path: 'root:projects/a' }));
+      ok('sandbox writes allowed', () => !blocked('write_file', { path: 'autopilot/x.md' }));
+      ok('github writes blocked (non-GET)', () => blocked('github_api', { method: 'POST' }));
+      ok('self-update blocked without allowUpdates', () => blocked('submit_update', { ref: 'x' }));
+      ok('self-update allowed with flag', () => !blocked('submit_update', { ref: 'x' }, { ...cfg, allowUpdates: true }));
     }
   }
 
