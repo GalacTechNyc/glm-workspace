@@ -349,7 +349,7 @@ const DEFAULTS = {
   memory: { enabled: true, keepReasoning: true, maxPromptChars: 12000 },
   web: { userAgent: '', maxChars: 50000, maxDownloadMB: 100, allowPrivate: false, respectRobots: true, crawlDelayMs: 250 },
   search: { provider: 'zai', count: 8, location: 'us', contentSize: 'medium', recency: 'noLimit' },
-  look: { expandSearch: true, theme: 'system', accent: '#6d5dfc', fontSize: 15, width: 820, font: 'inter', bubbles: false, radius: 14, showReasoning: true, showMeta: true, enterSends: true, customCss: '' },
+  look: { expandSearch: true, theme: 'system', accent: 'default', fontSize: 15, width: 820, font: 'inter', bubbles: false, radius: 14, showReasoning: true, showMeta: true, enterSends: true, customCss: '' },
 };
 function deepMerge(base, over) {
   if (Array.isArray(base) || typeof base !== 'object' || base === null) return over ?? base;
@@ -1902,10 +1902,10 @@ function renderPanel() {
       <div id="sessionsBox" class="meta">…</div>`;
     loadFileTree();
   } else if (activeTab === 'look') {
-    const accents = ['#6d5dfc', '#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#111827'];
+    const accents = ['#ff6a2b', '#6d5dfc', '#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#111827'];
     b.innerHTML = `
       ${field('Theme', `<select data-bind="look.theme"><option value="system" ${S.look.theme === 'system' ? 'selected' : ''}>System</option><option value="light" ${S.look.theme === 'light' ? 'selected' : ''}>Light</option><option value="dark" ${S.look.theme === 'dark' ? 'selected' : ''}>Dark</option></select>`)}
-      ${field('Accent color', `<div class="color-row">${accents.map(c => `<span class="swatch${S.look.accent === c ? ' active' : ''}" data-accent="${c}" style="background:${c}"></span>`).join('')}<input type="color" data-bind="look.accent" value="${S.look.accent}"></div>`)}
+      ${field('Accent color', `<div class="color-row">${accents.map(c => `<span class="swatch${S.look.accent === c ? ' active' : ''}" data-accent="${c}" style="background:${c}"></span>`).join('')}<input type="color" data-bind="look.accent" value="${S.look.accent === 'default' ? '#ff6a2b' : S.look.accent}"></div>`)}
       ${field('Font', `<select data-bind="look.font"><option value="inter" ${S.look.font === 'inter' ? 'selected' : ''}>Inter (sans)</option><option value="system" ${S.look.font === 'system' ? 'selected' : ''}>System UI</option><option value="serif" ${S.look.font === 'serif' ? 'selected' : ''}>Source Serif</option><option value="mono" ${S.look.font === 'mono' ? 'selected' : ''}>JetBrains Mono</option></select>`)}
       ${field('Font size', `<input type="range" min="12" max="20" step="1" data-bind="look.fontSize" value="${S.look.fontSize}">`, '', S.look.fontSize + 'px')}
       ${field('Chat width', `<input type="range" min="560" max="1400" step="20" data-bind="look.width" value="${S.look.width}">`, '', S.look.width + 'px')}
@@ -1919,10 +1919,16 @@ function renderPanel() {
   }
 }
 
+function migrateLook() {
+  // saved settings used to pin the built-in accent forever — map the old default
+  // to the 'default' sentinel once so shipped themes reach existing profiles
+  if (S.look && S.look.accent === '#6d5dfc' && !S.look.accentMigrated) { S.look.accent = 'default'; S.look.accentMigrated = true; saveSettings(); }
+}
 function applyLook() {
+  migrateLook();
   const L = S.look, r = document.documentElement;
   if (L.theme === 'system') r.removeAttribute('data-theme'); else r.dataset.theme = L.theme;
-  r.style.setProperty('--accent', L.accent);
+  if (L.accent && L.accent !== 'default') r.style.setProperty('--accent', L.accent); else r.style.removeProperty('--accent');
   r.style.setProperty('--font-size', L.fontSize + 'px');
   r.style.setProperty('--chat-width', L.width + 'px');
   r.style.setProperty('--radius', L.radius + 'px');
