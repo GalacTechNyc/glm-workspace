@@ -104,6 +104,7 @@ async function applyUpdate(t) {
   const tmp = path.join(ROOT, '.verify-worktree');
   fs.rmSync(tmp, { recursive: true, force: true });
   git(['worktree', 'add', '--quiet', '--detach', tmp, t.ref]);
+  try { fs.copyFileSync(path.join(ROOT, '.env'), path.join(tmp, '.env')); } catch {} // smoke boot needs a key
   let verdict;
   try {
     verdict = run(process.execPath, ['verify.js'], { cwd: tmp });

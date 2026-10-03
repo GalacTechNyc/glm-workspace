@@ -468,7 +468,8 @@ async function clear_sessions(o = {}) {
 async function capabilities() {
   return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()],
     extra_roots: EXTRA_ROOTS.map(r => ({ name: r.name, write: r.write })),
-    self_update: readEnvFile().AUTO_UPDATE === 'on' && !!(readEnvFile().UPDATE_SECRET || '') };
+    self_update: readEnvFile().AUTO_UPDATE === 'on' && !!(readEnvFile().UPDATE_SECRET || ''),
+    build: require('./package.json').version };
 }
 
 /* ---------------- image generation (OpenAI) ---------------- */
@@ -990,8 +991,13 @@ async function submit_update(o) {
   if (readEnvFile().AUTO_UPDATE !== 'on') throw new Error('Self-update is off (AUTO_UPDATE != on in .env). Nothing was written.');
   const short = String(o.ref).slice(0, 7);
   const { spawnSync } = require('child_process');
-  const check = spawnSync('git', ['cat-file', '-e', `${o.ref}^{commit}`], { cwd: __dirname, encoding: 'utf8' });
-  if (check.status !== 0) throw new Error(`${short} is not a commit in this checkout (did the branch get pushed/fetched?)`);
+  const catFile = () => spawnSync('git', ['cat-file', '-e', `${o.ref}^{commit}`], { cwd: __dirname, encoding: 'utf8' });
+  let check = catFile();
+  if (check.status !== 0) { // not known locally — fetch the sha from origin (GitHub allows sha fetches)
+    spawnSync('git', ['fetch', '--quiet', 'origin', String(o.ref)], { cwd: __dirname, encoding: 'utf8' });
+    check = catFile();
+  }
+  if (check.status !== 0) throw new Error(`${short} is not a commit in this checkout or on origin (was it pushed?)`);
   const t = signRef(String(o.ref));
   const fsx = require('fs');
   fsx.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
