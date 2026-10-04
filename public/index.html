@@ -338,6 +338,7 @@ const DEFAULTS = {
       remember: true, update_memory: true, forget: true, search_chats: true, read_chat: true,
       look_at_image: true, transcribe_audio: true, listen_to_audio: true, generate_image: true, generate_video: true, video_status: true, run_code: true, code_status: true, code_reset: true, run_javascript: true, calculator: true, get_current_time: true,
       github_api: true, run_command: false, mcp_list: true, mcp_call: true, submit_update: false,
+      save_lesson: true, list_lessons: true, delete_lesson: true,
     },
     confirm: { deletes: true, writes: false, nonGet: true, crawls: false, js: false, images: false, videos: true, audio: false, commands: true, mcp: false, outsideWrites: true, updates: true },
     custom: [EXAMPLE_TOOL],
@@ -594,6 +595,21 @@ Object.assign(BUILTINS, {
       }, required: ['ref'] },
     },
     run: args => callServerTool('submit_update', args),
+  },
+  save_lesson: {
+    group: 'Memory', server: true,
+    def: { name: 'save_lesson', description: "Distill a durable operational lesson from this session - what broke and why, what worked, how to drive this workspace - so future sessions start smarter. One specific lesson per call, under 1000 chars, with a short tag (e.g. 'self-update', 'paths', 'verify'). Lessons are injected into every future chat and autopilot run. Save them when they happen, not just at the end. When a lesson becomes obsolete, delete_lesson it.", parameters: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string', description: 'Short lowercase tag, e.g. "self-update", "ui", "verify".' } }, required: ['text'] } },
+    run: args => refreshAfter(callServerTool('save_lesson', args)),
+  },
+  list_lessons: {
+    group: 'Memory', server: true,
+    def: { name: 'list_lessons', description: 'List learned lessons, newest first, optionally by tag.', parameters: { type: 'object', properties: { tag: { type: 'string' }, limit: { type: 'integer' } } } },
+    run: args => callServerTool('list_lessons', args),
+  },
+  delete_lesson: {
+    group: 'Memory', server: true,
+    def: { name: 'delete_lesson', description: 'Delete an obsolete or wrong lesson by id (from list_lessons).', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+    run: args => refreshAfter(callServerTool('delete_lesson', args)),
   },
   mcp_call: {
     group: 'MCP', server: true, needs: 'mcp',
@@ -956,9 +972,10 @@ Object.assign(BUILTINS, {
   },
 });
 
-let memoryCache = [];
+let memoryCache = [], lessonsCache = [];
 async function refreshMemory() {
   try { const r = await callServerTool('memory_list', {}); if (Array.isArray(r.memories)) memoryCache = r.memories; } catch {}
+  try { const l = await callServerTool('list_lessons', { limit: 200 }); if (Array.isArray(l.lessons)) lessonsCache = l.lessons; } catch {}
   if (activeTab === 'memory' && !$('#panel').classList.contains('hidden')) renderPanel();
 }
 function memoryPrompt() {
@@ -973,6 +990,14 @@ function memoryPrompt() {
   return `## Long-term memory
 You have persistent memory that carries across every conversation with this user.${canEdit ? ' Save durable facts with `remember` (preferences, projects, decisions, key results), keep them current with `update_memory` / `forget`, and use `search_chats` / `read_chat` to look up earlier conversations when they are relevant.' : ''}
 ${lines.length ? 'What you remember:\n' + lines.join('\n') : '(Nothing saved yet.)'}${hidden ? `\n(${hidden} older memories not shown.)` : ''}`;
+}
+
+function lessonsPrompt() {
+  if (!lessonsCache.length) return '';
+  const shown = lessonsCache.slice(0, 40); // newest first (cache is newest-first)
+  return `## Lessons from past sessions
+These operational lessons were learned the hard way in earlier sessions - failures, debugging, how this workspace works. Apply them; don't re-learn them. Keep the set current with save_lesson (new) and delete_lesson (obsolete).
+${shown.map(l => `- [${l.tag}] ${l.text}`).join('\n')}${lessonsCache.length > shown.length ? `\n(${lessonsCache.length - shown.length} older lessons not shown - list_lessons for all.)` : ''}`;
 }
 
 const webOpts = () => ({ userAgent: S.web.userAgent || undefined, allowPrivate: S.web.allowPrivate, maxBytes: S.web.maxDownloadMB * 1e6 });
@@ -1082,7 +1107,7 @@ function trimContext(messages) {
 
 function buildRequest(history, chat) {
   const messages = [];
-  const system = [S.system.trim(), S.memory.enabled ? memoryPrompt() : '', chat?.autopilot ? autopilotPrompt(chat.autopilot) : ''].filter(Boolean).join('\n\n');
+  const system = [S.system.trim(), S.memory.enabled ? memoryPrompt() : '', S.memory.enabled ? lessonsPrompt() : '', chat?.autopilot ? autopilotPrompt(chat.autopilot) : ''].filter(Boolean).join('\n\n');
   if (system) messages.push({ role: 'system', content: system });
   // tool calls that never got a result (e.g. a cycle hit its round limit) would make the API reject the request
   const answered = new Set(history.filter(m => m.role === 'tool').map(m => m.tool_call_id));
@@ -1879,6 +1904,14 @@ function renderPanel() {
       <div class="help" style="font-size:.78em;color:var(--muted);margin-bottom:12px">GLM saves memories itself with the <code>remember</code> tool and can search all your past chats. It always remembers everything inside a chat.</div>
       ${field('Add a memory', `<textarea class="prose" rows="2" id="memNew" placeholder="e.g. I prefer short answers with code examples"></textarea>`, '', '')}
       <button class="btn sm primary" id="memAdd">Save memory</button>
+      <div class="section-title">Lessons (${lessonsCache.length})</div>
+      <div class="help" style="font-size:.78em;color:var(--muted);margin-bottom:8px">Operational lessons GLM distills from its own failures. Injected into every future chat and autopilot run.</div>
+      ${lessonsCache.length ? lessonsCache.slice(0, 60).map(l => `
+        <div class="file-row" style="align-items:flex-start">
+          <span class="fname" style="white-space:normal"><span class="badge">${esc(l.tag)}</span> ${esc(l.text)}
+            <span class="meta" style="display:block;margin:2px 0 0">${(l.created || '').slice(0, 10)} · ${l.id}</span></span>
+          <button class="icon-btn" data-ldel="${l.id}" title="Delete lesson">🗑</button>
+        </div>`).join('') : '<div class="meta">None yet.</div>'}
       <div class="section-title">Memories (${memoryCache.length})</div>
       ${memoryCache.length ? [...memoryCache].reverse().map(m => `
         <div class="file-row" style="align-items:flex-start">
@@ -2054,6 +2087,7 @@ $('#panelBody').addEventListener('click', e => {
     if (text && text.trim() !== m.text) callServerTool('update_memory', { id: medit, text }).then(refreshMemory);
   }
   if (t.dataset.mdel) callServerTool('forget', { id: t.dataset.mdel }).then(refreshMemory);
+  if (t.dataset.ldel) callServerTool('delete_lesson', { id: t.dataset.ldel }).then(() => { refreshMemory(); toast('Lesson deleted'); });
   if (t.id === 'memExport') download('glm-memory.json', JSON.stringify(memoryCache, null, 2));
   if (t.id === 'memClear' && confirm('Delete all memories? This cannot be undone.')) callServerTool('memory_clear', {}).then(refreshMemory);
   if (t.id === 'filesRefresh') loadFileTree();

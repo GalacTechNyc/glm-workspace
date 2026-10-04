@@ -29,6 +29,9 @@ const SCHEMAS = {
   search_chats: { name: 'search_chats', description: 'Search past conversations for words or a phrase.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer' } } } },
   read_chat: { name: 'read_chat', description: 'Read a past conversation by chat_id.', parameters: { type: 'object', properties: { chat_id: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['chat_id'] } },
   submit_update: { name: 'submit_update', description: 'Propose updating the app itself to a specific commit. The watcher process independently verifies (tests + smoke boot) before anything restarts, and rolls back on failure. Use for improvements to this workspace you have already pushed as a commit.', parameters: { type: 'object', properties: { ref: { type: 'string', description: 'Full or short commit sha to move to.' }, note: { type: 'string', description: 'What this update does, one line.' } }, required: ['ref'] } },
+  save_lesson: { name: 'save_lesson', description: 'Distill a durable operational lesson from this run - what broke and why, what worked, how to drive the tools - so future runs start smarter. One specific lesson per call, under 1000 chars, with a short tag (e.g. "self-update", "paths", "verify"). Save lessons during the run when they happen, not only at the end.', parameters: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' } }, required: ['text'] } },
+  list_lessons: { name: 'list_lessons', description: 'List learned lessons (newest first), optionally filtered by tag.', parameters: { type: 'object', properties: { tag: { type: 'string' }, limit: { type: 'integer' } } } },
+  delete_lesson: { name: 'delete_lesson', description: 'Delete an obsolete or wrong lesson by id (from list_lessons).', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
 };
 
 function guard(name, args, cfg) {
@@ -52,7 +55,7 @@ Mission: ${cfg.goal}
 Work in cycles: make real progress with your tools every cycle, then finish the cycle with two lines: "DONE: <one line>" and "NEXT: <one line>". When the whole mission is complete, write AUTOPILOT_DONE on its own line.
 Append a short dated entry to ${JOURNAL} each cycle (what you did, learned, what's next). Save real outputs under autopilot/<project>/.
 Limits: no web_search in headless mode (fetch pages directly); no sign-ups, logins, posting or purchases; respect robots.txt; if an action is blocked, adapt and move on.
-${cfg.readOnlyWeb ? 'You are read-only on the web: GET requests only.' : 'Prefer read-only web access; only send data when the mission clearly needs it.'}${memories.length ? `\nWhat you remember:\n${memories.map(m => `- [${m.id}] ${m.text}`).join('\n')}` : ''}`;
+${cfg.readOnlyWeb ? 'You are read-only on the web: GET requests only.' : 'Prefer read-only web access; only send data when the mission clearly needs it.'}${memories.length ? `\nWhat you remember:\n${memories.map(m => `- [${m.id}] ${m.text}`).join('\n')}` : ''}${lessons.length ? `\n## Lessons from past runs (act on these - they were paid for)\n${lessons.map(l => `- [${l.tag}] ${l.text}`).join('\n')}` : ''}`;
 }
 
 function trimHistory(msgs) {
@@ -122,6 +125,7 @@ async function runCycle() {
 
 async function runLoop(cfg) {
   const memories = await tools.loadMemory().catch(() => []);
+  const lessons = (await tools.loadLessons().catch(() => [])).slice(-40).reverse();
   RUN.system = systemPrompt(cfg, memories);
   log(`started: "${clip(cfg.goal, 100)}" (${cfg.cycles} cycles, ${cfg.minutes} min)`);
   const deadline = Date.now() + cfg.minutes * 60000;

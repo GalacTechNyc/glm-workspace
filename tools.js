@@ -469,6 +469,7 @@ async function capabilities() {
   return { chrome: !!CHROME, images: !!process.env.OPENAI_API_KEY, audio: !!process.env.OPENAI_API_KEY, videos: !!process.env.ATLASCLOUD_API_KEY, github: !!process.env.GITHUB_TOKEN, shell: commandAllowlist().length > 0, shell_allowlist: commandAllowlist(), mcp: mcpServers().length > 0, chrome_path: CHROME || null, files_root: FILES_ROOT, sessions: [...jars.keys()],
     extra_roots: EXTRA_ROOTS.map(r => ({ name: r.name, write: r.write })),
     self_update: readEnvFile().AUTO_UPDATE === 'on' && !!(readEnvFile().UPDATE_SECRET || ''),
+    lessons: (() => { try { return JSON.parse(fs.readFileSync(LESSONS_FILE, 'utf8')).length; } catch { return 0; } })(),
     build: require('./package.json').version };
 }
 
@@ -755,6 +756,56 @@ async function forget(o) {
   });
 }
 
+/* ---------------- lessons: distilled experience, injected at every boot ----------------
+   Memories are facts about the user and projects; lessons are operational wisdom:
+   what broke, what worked, how to drive this app. They are written to
+   data/lessons.json, injected into every chat system prompt and headless
+   autopilot run, and prunable when obsolete. */
+const LESSONS_FILE = path.join(DATA_DIR, 'lessons.json');
+async function loadLessons() {
+  try { return JSON.parse(await fsp.readFile(LESSONS_FILE, 'utf8')); } catch { return []; }
+}
+let lessonsQueue = Promise.resolve();
+function withLessons(fn) {
+  const run = lessonsQueue.then(async () => {
+    const list = await loadLessons();
+    const result = await fn(list);
+    await fsp.writeFile(LESSONS_FILE + '.tmp', JSON.stringify(list, null, 2));
+    await fsp.rename(LESSONS_FILE + '.tmp', LESSONS_FILE);
+    return result;
+  });
+  lessonsQueue = run.catch(() => {});
+  return run;
+}
+async function save_lesson(o) {
+  const text = String(o.text || '').trim();
+  if (!text) throw new Error('text is required');
+  if (text.length > 1000) throw new Error("Keep each lesson under 1000 characters - distill, don't dump.");
+  const tag = String(o.tag || 'general').trim().toLowerCase().slice(0, 40) || 'general';
+  return withLessons(list => {
+    const norm = text.toLowerCase();
+    const dup = list.find(l => l.text.toLowerCase() === norm);
+    if (dup) return { saved: false, note: 'Already learned', id: dup.id };
+    const l = { id: 'L' + memId(), tag, text, created: new Date().toISOString(), source: o.source === 'glm-headless' ? 'glm-headless' : 'glm' };
+    list.push(l);
+    return { saved: true, id: l.id, tag, total_lessons: list.length };
+  });
+}
+async function list_lessons(o = {}) {
+  const list = await loadLessons();
+  const filtered = o.tag ? list.filter(l => l.tag === String(o.tag).toLowerCase()) : list;
+  const limit = Math.min(Math.max(Number(o.limit) || 50, 1), 200);
+  return { count: filtered.length, total: list.length, lessons: filtered.slice(-limit).reverse() };
+}
+async function delete_lesson(o) {
+  return withLessons(list => {
+    const i = list.findIndex(x => x.id === o.id);
+    if (i < 0) throw new Error(`No lesson with id ${o.id}`);
+    const [l] = list.splice(i, 1);
+    return { deleted: l.id, tag: l.tag, was: l.text, remaining: list.length };
+  });
+}
+
 async function memory_clear() {
   return withMemory(list => { const n = list.length; list.length = 0; return { cleared: n }; });
 }
@@ -1014,6 +1065,7 @@ const TOOLS = {
   memory_list, remember, update_memory, forget, memory_clear, search_chats, read_chat, generate_image,
   generate_video, video_status, transcribe_chunks, listen_audio,
   github_api, run_command, mcp_list, mcp_call, submit_update,
+  save_lesson, list_lessons, delete_lesson,
 };
 
 /* ---------------- HTTP glue ---------------- */
@@ -1079,5 +1131,5 @@ async function callTool(name, args = {}) {
 }
 
 // internal exports for verify.js (the gate the watcher runs before any update)
-module.exports = { handleTool, serveFile, serveZip, callTool, loadMemory, EXTRA_ROOTS,
+module.exports = { handleTool, serveFile, serveZip, callTool, loadMemory, loadLessons, EXTRA_ROOTS,
   _internals: { safePath, relPath, findExtraRoot, EXTRA_ROOTS, readEnvFile } };
